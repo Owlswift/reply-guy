@@ -72,7 +72,7 @@ async function run() {
         });
 
         // Go back to timeline
-        await page.goBack();
+        await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
         await sleepRandom(1000, 2000);
         continue;
       }
@@ -98,7 +98,7 @@ async function run() {
 
       if (!reply) {
         console.log("Failed to generate valid reply");
-        await page.goBack();
+        await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
         continue;
       }
 
@@ -128,7 +128,7 @@ async function run() {
       log(success ? "info" : "error", `Reply to ${tweet.id}: ${success ? "success" : "failed"}`);
 
       // Go back to timeline
-      await page.goBack();
+      await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
       await sleepRandom(3000, 6000);
     }
 
