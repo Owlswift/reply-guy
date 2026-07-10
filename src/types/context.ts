@@ -8,4 +8,5 @@ export interface PipelineContext {
   analysis: AnalysisResult | null;
   draft: Draft | null;
   action: "approve" | "edit" | "skip" | "quit" | null;
+  reply: string | null;
 }

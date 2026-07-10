@@ -1,6 +1,5 @@
-import { MockSource } from "./sources/MockSource";
-import { MockAnalyzer } from "./ai/MockAnalyzer";
-import { MockReplyGenerator } from "./ai/MockReplyGenerator";
+import { TwitterSource } from "./sources/TwitterSource";
+import { OpenAIProvider } from "./ai/OpenAIProvider";
 import { Pipeline } from "./pipeline/Pipeline";
 import { FetchStage } from "./pipeline/stages/FetchStage";
 import { AnalyzeStage } from "./pipeline/stages/AnalyzeStage";
@@ -8,11 +7,13 @@ import { DraftStage } from "./pipeline/stages/DraftStage";
 import { ApprovalStage } from "./pipeline/stages/ApprovalStage";
 import { displayHeader, displayTweet } from "./ui/display";
 import { PipelineContext } from "./types/context";
+import { DraftRepository } from "./database/DraftRepository";
+import { reply } from "./twitter/reply";
 
 async function main() {
-  const source = new MockSource();
-  const analyzer = new MockAnalyzer();
-  const replyGenerator = new MockReplyGenerator();
+  const source = new TwitterSource();
+  const ai = new OpenAIProvider();
+  const draftRepo = new DraftRepository();
 
   // Fetch all tweets first
   const fetchStage = new FetchStage(source);
@@ -22,6 +23,7 @@ async function main() {
     analysis: null,
     draft: null,
     action: null,
+    reply: null,
   });
 
   displayHeader(tweets);
@@ -31,8 +33,8 @@ async function main() {
     displayTweet(tweet, i + 1, tweets.length);
 
     const pipeline = new Pipeline()
-      .addStage(new AnalyzeStage(analyzer))
-      .addStage(new DraftStage(replyGenerator))
+      .addStage(new AnalyzeStage(ai))
+      .addStage(new DraftStage(ai))
       .addStage(new ApprovalStage());
 
     const context: PipelineContext = {
@@ -41,6 +43,7 @@ async function main() {
       analysis: null,
       draft: null,
       action: null,
+      reply: null,
     };
 
     const result = await pipeline.run(context);
@@ -50,7 +53,20 @@ async function main() {
       break;
     }
 
-    console.log(`  → ${result.action}\n`);
+    if (result.action === "skip") {
+      console.log(`  → skipped\n`);
+      continue;
+    }
+
+    if (result.action === "approve" && result.reply) {
+      // Save decision to PostgreSQL
+      await draftRepo.saveDecision(tweet.id, result.reply, true);
+
+      // Post the reply
+      await reply(tweet.id, result.reply);
+
+      console.log(`  → replied\n`);
+    }
   }
 }
 

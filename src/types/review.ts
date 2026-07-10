@@ -5,3 +5,15 @@ export interface ReviewItem {
   tweet: Tweet;
   draft: Draft;
 }
+
+export type ReviewAction =
+  | {
+      action: "approve";
+      reply: string;
+    }
+  | {
+      action: "skip";
+    }
+  | {
+      action: "quit";
+    };

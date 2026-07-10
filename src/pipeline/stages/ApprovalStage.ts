@@ -16,6 +16,26 @@ export class ApprovalStage implements PipelineStage<PipelineContext> {
       ],
     });
 
-    return { ...context, action };
+    if (action === "quit") {
+      return { ...context, action: "quit", reply: null };
+    }
+
+    if (action === "skip") {
+      return { ...context, action: "skip", reply: null };
+    }
+
+    let reply = context.draft?.reply ?? "";
+
+    if (action === "edit") {
+      const { editedReply } = await prompts({
+        type: "text",
+        name: "editedReply",
+        message: "Edit reply:",
+        initial: context.draft?.reply ?? "",
+      });
+      reply = editedReply;
+    }
+
+    return { ...context, action: "approve", reply };
   }
 }
