@@ -11,9 +11,13 @@ export async function getTimelineTweets(
   page: Page,
   limit = 30
 ): Promise<TimelineTweet[]> {
-  // Check if already on x.com/home
+  // Check if already on x.com/home or timeline
   const currentUrl = page.url();
-  if (!currentUrl.includes("x.com/home") && !currentUrl.includes("x.com/")) {
+  if (currentUrl.includes("/status/")) {
+    // If on a tweet page, go back to home
+    console.log("On tweet page, going back to home...");
+    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+  } else if (!currentUrl.includes("x.com/")) {
     console.log("Navigating to x.com/home...");
     await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
   }
