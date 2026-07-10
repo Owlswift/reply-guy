@@ -42,6 +42,13 @@ async function run() {
       // Extract details
       const details = await extractCurrentTweet(page);
 
+      // Skip if no text extracted
+      if (!details.text) {
+        console.log("No text extracted, skipping");
+        await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+        continue;
+      }
+
       // Get relationship and classify
       const relationship = await getRelationship(page);
       const tweetType = classifyTweet(details.text);

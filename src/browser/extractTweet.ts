@@ -11,7 +11,18 @@ export async function extractCurrentTweet(
   page: Page
 ): Promise<TweetDetails> {
 
-  await page.waitForSelector("article");
+  // Wait for article with timeout
+  try {
+    await page.waitForSelector("article", { timeout: 5000 });
+  } catch {
+    // If no article found, return empty
+    return {
+      author: "",
+      handle: "",
+      text: "",
+      url: page.url()
+    };
+  }
 
   const article = page.locator("article").first();
 
@@ -19,14 +30,14 @@ export async function extractCurrentTweet(
     (await article
       .locator('[data-testid="User-Name"]')
       .first()
-      .textContent())?.trim() ?? "";
+      .textContent({ timeout: 3000 }))?.trim() ?? "";
 
   // Use first() to avoid strict mode violation
   const text =
     (await article
       .locator('[data-testid="tweetText"]')
       .first()
-      .textContent())?.trim() ?? "";
+      .textContent({ timeout: 3000 }))?.trim() ?? "";
 
   const handleMatch = author.match(/@\w+/);
 
