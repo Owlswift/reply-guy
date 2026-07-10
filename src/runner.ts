@@ -43,15 +43,13 @@ async function run() {
       const details = await extractCurrentTweet(page);
 
       // Get relationship and classify
-      const relationship = await getRelationship(page, details.handle);
+      const relationship = await getRelationship(page);
       const tweetType = classifyTweet(details.text);
 
       // Build TimelineTweet for decision engine with relationship info
       const timelineTweet = {
         ...tweet,
-        verified: relationship === "verified",
-        following: relationship === "mutual" || relationship === "following",
-        followsYou: false // We don't have this info from getRelationship
+        verified: relationship === "verified"
       };
 
       // Decide whether to reply

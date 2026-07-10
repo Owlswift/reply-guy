@@ -3,9 +3,8 @@ import { TimelineTweet } from "../types/tweet";
 export function relationshipScore(tweet: TimelineTweet): number {
   let score = 0;
 
-  if (tweet.following) score += 40;
-  if (tweet.followsYou) score += 40;
-  if (tweet.following && tweet.followsYou) score += 30;
+  // Verified users get a high score
+  if (tweet.verified) score += 50;
 
   return score;
 }
