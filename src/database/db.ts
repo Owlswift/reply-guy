@@ -1,14 +1,50 @@
 import Database from "better-sqlite3";
 
-export const db = new Database("echo.db");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const database: any = new Database("echo.db");
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS replies (
+database.pragma("journal_mode = WAL");
+
+database.exec(`
+CREATE TABLE IF NOT EXISTS tweets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tweet_link TEXT UNIQUE,
+    tweet_id TEXT UNIQUE,
     author TEXT,
-    tweet TEXT,
-    reply TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    text TEXT,
+    url TEXT,
+    scraped_at TEXT
 );
 `);
+
+database.exec(`
+CREATE TABLE IF NOT EXISTS replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tweet_id TEXT,
+    draft TEXT,
+    final_reply TEXT,
+    status TEXT,
+    created_at TEXT
+);
+`);
+
+database.exec(`
+CREATE TABLE IF NOT EXISTS queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tweet_id TEXT,
+    priority INTEGER DEFAULT 0,
+    status TEXT,
+    retries INTEGER DEFAULT 0,
+    created_at TEXT
+);
+`);
+
+database.exec(`
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT,
+    message TEXT,
+    created_at TEXT
+);
+`);
+
+export { database as db };
