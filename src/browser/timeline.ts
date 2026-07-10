@@ -60,6 +60,15 @@ export async function getTimelineTweets(
       const handleMatch = author.match(/@\w+/);
       const handle = handleMatch?.[0] ?? "";
 
+      // Extract engagement counts
+      const likeButton = article.querySelector('[data-testid="like"]');
+      const replyButton = article.querySelector('[data-testid="reply"]');
+      const repostButton = article.querySelector('[data-testid="retweet"]');
+
+      const likes = parseInt(likeButton?.textContent?.trim() || "0") || 0;
+      const replies = parseInt(replyButton?.textContent?.trim() || "0") || 0;
+      const reposts = parseInt(repostButton?.textContent?.trim() || "0") || 0;
+
       return {
         id: match?.[1] ?? "",
         author,
@@ -71,9 +80,9 @@ export async function getTimelineTweets(
         verified: false,
         following: false,
         followsYou: false,
-        likes: 0,
-        replies: 0,
-        reposts: 0
+        likes,
+        replies,
+        reposts
       };
     });
   }, limit);

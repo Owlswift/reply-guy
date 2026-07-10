@@ -48,17 +48,10 @@ async function run() {
 
       // Build TimelineTweet for decision engine with relationship info
       const timelineTweet = {
-        id: tweet.id,
-        author: details.author,
-        username: details.handle,
-        text: details.text,
-        url: details.url,
+        ...tweet,
         verified: relationship === "verified",
         following: relationship === "mutual" || relationship === "following",
-        followsYou: false, // We don't have this info from getRelationship
-        likes: 0,
-        replies: 0,
-        reposts: 0
+        followsYou: false // We don't have this info from getRelationship
       };
 
       // Decide whether to reply
