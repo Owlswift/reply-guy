@@ -21,9 +21,11 @@ export async function extractCurrentTweet(
       .first()
       .textContent())?.trim() ?? "";
 
+  // Use first() to avoid strict mode violation
   const text =
     (await article
       .locator('[data-testid="tweetText"]')
+      .first()
       .textContent())?.trim() ?? "";
 
   const handleMatch = author.match(/@\w+/);
