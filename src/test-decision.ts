@@ -1,39 +1,39 @@
 import { shouldReply } from "./decision/shouldReply";
 import { TimelineTweet } from "./types/tweet";
 
-// Test 1: Mutual account
-const mutualTweet: TimelineTweet = {
+// Test 1: Verified user
+const verifiedTweet: TimelineTweet = {
   id: "123",
   author: "John Doe",
   username: "johndoe",
-  text: "This is a great tweet about React Native!",
+  text: "Short tweet",
   url: "https://x.com/johndoe/status/123",
-  verified: false,
-  following: true,
-  followsYou: true,
-  likes: 15,
-  replies: 5,
-  reposts: 2
-};
-
-console.log("Mutual tweet:", shouldReply(mutualTweet));
-
-// Test 2: Following but not mutual
-const followingTweet: TimelineTweet = {
-  id: "456",
-  author: "Jane Smith",
-  username: "janesmith",
-  text: "Check out this new library!",
-  url: "https://x.com/janesmith/status/456",
-  verified: false,
-  following: true,
+  verified: true,
+  following: false,
   followsYou: false,
-  likes: 5,
-  replies: 1,
+  likes: 0,
+  replies: 0,
   reposts: 0
 };
 
-console.log("Following tweet:", shouldReply(followingTweet));
+console.log("Verified tweet:", shouldReply(verifiedTweet));
+
+// Test 2: Verified user with high engagement
+const verifiedEngagementTweet: TimelineTweet = {
+  id: "456",
+  author: "Jane Smith",
+  username: "janesmith",
+  text: "Short tweet",
+  url: "https://x.com/janesmith/status/456",
+  verified: true,
+  following: false,
+  followsYou: false,
+  likes: 50,
+  replies: 10,
+  reposts: 5
+};
+
+console.log("Verified with engagement:", shouldReply(verifiedEngagementTweet));
 
 // Test 3: Spam tweet
 const spamTweet: TimelineTweet = {
@@ -57,16 +57,16 @@ const strangerTweet: TimelineTweet = {
   id: "101",
   author: "Random User",
   username: "randomuser",
-  text: "This is a very long tweet about something interesting that I want to discuss in detail because it's important.",
+  text: "Short tweet",
   url: "https://x.com/randomuser/status/101",
   verified: false,
   following: false,
   followsYou: false,
-  likes: 50,
-  replies: 10,
+  likes: 100,
+  replies: 15,
   reposts: 5
 };
 
-console.log("Stranger tweet:", shouldReply(strangerTweet));
+console.log("Stranger with engagement:", shouldReply(strangerTweet));
 
 console.log("\nAll decision tests passed!");

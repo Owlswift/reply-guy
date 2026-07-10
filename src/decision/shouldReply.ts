@@ -19,7 +19,7 @@ export function shouldReply(tweet: TimelineTweet): Decision {
 
   const score = scoreTweet(tweet);
 
-  if (score >= 40) {
+  if (score >= 20) {
     return {
       reply: true,
       score,
