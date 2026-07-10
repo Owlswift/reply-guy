@@ -42,16 +42,20 @@ async function run() {
       // Extract details
       const details = await extractCurrentTweet(page);
 
-      // Build TimelineTweet for decision engine
+      // Get relationship and classify
+      const relationship = await getRelationship(page, details.handle);
+      const tweetType = classifyTweet(details.text);
+
+      // Build TimelineTweet for decision engine with relationship info
       const timelineTweet = {
         id: tweet.id,
         author: details.author,
         username: details.handle,
         text: details.text,
         url: details.url,
-        verified: false,
-        following: false,
-        followsYou: false,
+        verified: relationship === "verified",
+        following: relationship === "mutual" || relationship === "following",
+        followsYou: false, // We don't have this info from getRelationship
         likes: 0,
         replies: 0,
         reposts: 0
@@ -76,10 +80,6 @@ async function run() {
         await sleepRandom(1000, 2000);
         continue;
       }
-
-      // Get relationship and classify
-      const relationship = await getRelationship(page, details.handle);
-      const tweetType = classifyTweet(details.text);
 
       // Build prompt with personality
       const prompt = buildPersonalityPrompt(details.text, relationship, tweetType);

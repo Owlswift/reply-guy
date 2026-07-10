@@ -3,8 +3,15 @@ import { Page } from "playwright";
 export interface TimelineTweet {
   id: string;
   author: string;
+  username: string;
   text: string;
   url: string;
+  verified: boolean;
+  following: boolean;
+  followsYou: boolean;
+  likes: number;
+  replies: number;
+  reposts: number;
 }
 
 export async function getTimelineTweets(
@@ -49,13 +56,24 @@ export async function getTimelineTweets(
 
       const match = href.match(/status\/(\d+)/);
 
+      // Extract handle from author
+      const handleMatch = author.match(/@\w+/);
+      const handle = handleMatch?.[0] ?? "";
+
       return {
         id: match?.[1] ?? "",
         author,
+        username: handle,
         text,
         url: href.startsWith("http")
           ? href
-          : `https://x.com${href.split("?")[0]}`
+          : `https://x.com${href.split("?")[0]}`,
+        verified: false,
+        following: false,
+        followsYou: false,
+        likes: 0,
+        replies: 0,
+        reposts: 0
       };
     });
   }, limit);
