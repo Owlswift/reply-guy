@@ -1,40 +1,32 @@
-// import { getPage } from "./browser";
-
-// async function main() {
-//     const page = await getPage();
-
-//     await page.goto("https://x.com");
-
-//     console.log(
-//         "Please log into X manually if necessary."
-//     );
-
-//     await page.pause();
-// }
-
-// main();
 import { getPage } from "./browser";
+import { getTimelineTweets } from "./timeline";
+import { openTweet } from "./openTweet";
+import { extractCurrentTweet } from "./extractTweet";
+import { generateReply } from "../ai/generateReply";
 
 async function main() {
   const page = await getPage();
 
-  await page.goto("https://x.com/home");
+  const tweets = await getTimelineTweets(page);
 
-  await page.waitForLoadState("domcontentloaded");
+  const tweet = tweets[0];
 
-  console.log("Title:", await page.title());
+  if (!tweet) {
+    console.log("No tweets found");
+    return;
+  }
 
-  // Wait for the search box to appear
-  const search = page.getByPlaceholder("Search");
-  await search.waitFor({ timeout: 10000 });
+  await openTweet(page, tweet.url);
 
-  // Type into it
-  await search.click();
-  await search.fill("OpenAI");
+  const details = await extractCurrentTweet(page);
 
-  console.log("Typed into search box.");
+  console.log("Extracted tweet:", details);
 
-  await page.waitForTimeout(10000);
+  const draft = await generateReply(details.text);
+
+  console.log("AI Draft:", draft);
+
+  await page.waitForTimeout(60000);
 }
 
 main();

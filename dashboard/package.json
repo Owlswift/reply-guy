@@ -1,0 +1,15 @@
+{
+  "name": "echo-dashboard",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "tsx watch server/index.ts",
+    "start": "node dist/server/index.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "better-sqlite3": "^12.11.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0"
+  }
+}
