@@ -20,6 +20,7 @@ console.log("Has tweet 99999:", hasTweet("99999"));
 
 // Test reply
 saveReply({
+  task_id: "test-task-123",
   tweet_id: "12345",
   draft: "Test draft",
   final_reply: "Test reply",

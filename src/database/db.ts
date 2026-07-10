@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tweets (
 database.exec(`
 CREATE TABLE IF NOT EXISTS replies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
     tweet_id TEXT,
     draft TEXT,
     final_reply TEXT,
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS replies (
 database.exec(`
 CREATE TABLE IF NOT EXISTS queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT UNIQUE,
     tweet_id TEXT,
     priority INTEGER DEFAULT 0,
     status TEXT,

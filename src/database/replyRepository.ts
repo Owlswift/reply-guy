@@ -2,6 +2,7 @@ import { db } from "./db";
 
 export interface Reply {
   id?: number;
+  task_id: string;
   tweet_id: string;
   draft: string;
   final_reply: string;
@@ -11,9 +12,9 @@ export interface Reply {
 
 export function saveReply(reply: Reply): void {
   db.prepare(`
-    INSERT INTO replies (tweet_id, draft, final_reply, status, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(reply.tweet_id, reply.draft, reply.final_reply, reply.status, reply.created_at);
+    INSERT INTO replies (task_id, tweet_id, draft, final_reply, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(reply.task_id, reply.tweet_id, reply.draft, reply.final_reply, reply.status, reply.created_at);
 }
 
 export function getReplyCountToday(): number {
