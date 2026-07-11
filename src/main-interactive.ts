@@ -27,7 +27,7 @@ async function main() {
   let replyCount = 0;
 
   // Start workers
-  runAIWorker(page);
+  runAIWorker();
   runBrowserWorker(page);
 
   // Define source manager
@@ -39,6 +39,7 @@ async function main() {
   while (replyCount < DAILY_LIMIT) {
     // Check if review session is active - if so, wait
     if (sessionManager.isReviewing()) {
+      console.log("[Main] Review session active, waiting...");
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
@@ -97,6 +98,7 @@ async function main() {
               status: "pending"
             };
             enqueue(item);
+            console.log(`[Main] Enqueued tweet ${tweet.id} from ${tweet.source}`);
           }
         }
       }
@@ -112,7 +114,7 @@ async function main() {
       log(`Waiting ${waitTime / 1000}s before next check...`);
       await page.waitForTimeout(waitTime);
     } catch (err) {
-      console.error("Error in main loop:", err);
+      console.error("[Main] Error in main loop:", err);
       log("Recovering by going to home timeline...");
       await page.goto("https://x.com/home");
       await page.waitForTimeout(5000);

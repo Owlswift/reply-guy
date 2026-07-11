@@ -22,7 +22,7 @@ async function main() {
   let replyCount = 0;
 
   // Start workers
-  runAIWorker(page);
+  runAIWorker();
   runBrowserWorker(page);
 
   while (replyCount < DAILY_LIMIT) {

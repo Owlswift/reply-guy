@@ -1,67 +1,89 @@
-import { getQueue, findPending, updateItem, QueueItem } from "../core/queue";
-import { generateReply } from "../ai/ollama";
-import { classifyTweet } from "../ai/classifyTweet";
-import { getRelationship } from "../relationship/getRelationship";
+import { peek, dequeue, updateItem } from "../core/queue";
+import { generateReply } from "../ai/generateReply";
+import { buildPersonalityPrompt } from "../personality/prompt";
+import { validateReply } from "../personality/validator";
+import { isDuplicate } from "../personality/duplicate";
 import { log } from "../utils/logger";
-import { Page } from "playwright";
+import { stats } from "../stats/runtime";
 import { sessionManager } from "../core/sessionManager";
 
-export async function runAIWorker(page: Page): Promise<void> {
+export async function runAIWorker() {
+  console.log("[AIWorker] Starting AI worker...");
+  
   while (true) {
     // Check if review session is active - if so, wait
     if (sessionManager.isReviewing()) {
+      console.log("[AIWorker] Review session active, waiting...");
       await new Promise(r => setTimeout(r, 500));
       continue;
     }
 
-    const next = findPending();
+    const item = peek();
 
-    if (!next) {
+    if (!item) {
+      console.log("[AIWorker] No items in queue, waiting...");
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
 
-    // Skip if already has a draft (prevents reprocessing)
-    if (next.draft) {
+    // Only process items that are "pending" (not already processed)
+    if (item.status !== "pending") {
+      console.log(`[AIWorker] Item ${item.id} status is ${item.status}, skipping...`);
       await new Promise(r => setTimeout(r, 500));
       continue;
     }
 
-    // Skip if already being processed by browser worker
-    if (next.status === "processing") {
-      await new Promise(r => setTimeout(r, 500));
-      continue;
-    }
+    console.log(`[AIWorker] Processing item ${item.id}...`);
+
+    // Lock the item to prevent race conditions
+    updateItem(item.id, { status: "drafting" });
 
     try {
-      // Mark as drafting
-      updateItem(next.id, { status: "drafting" });
+      // Build prompt
+      const prompt = buildPersonalityPrompt(item.text, "stranger", "general", []);
 
-      // Get relationship if not already set
-      let relationship = next.relationship;
-      if (!relationship) {
-        // We need to open the tweet to get relationship
-        // For now, use default
-        relationship = "stranger";
+      // Generate reply with validation
+      let reply = "";
+      for (let i = 0; i < 3; i++) {
+        console.log(`[AIWorker] Generating reply attempt ${i + 1}...`);
+        reply = await generateReply(prompt);
+
+        if (validateReply(reply) && !isDuplicate(reply)) {
+          console.log(`[AIWorker] Valid reply generated for ${item.id}`);
+          break;
+        }
+
+        console.log(`[AIWorker] Retry ${i + 1} - invalid or duplicate reply`);
       }
 
-      // Generate reply
-      log(`AI generating reply for ${next.id}`);
-      const draft = await generateReply(next.text, relationship);
+      if (!reply) {
+        console.log(`[AIWorker] Failed to generate valid reply for ${item.id}`);
+        updateItem(item.id, {
+          status: "failed",
+          attempts: (item.attempts || 0) + 1
+        });
+        // Remove from queue after max attempts to prevent infinite loop
+        if ((item.attempts || 0) + 1 >= 3) {
+          dequeue();
+          console.log(`[AIWorker] Max attempts reached for ${item.id}, removing from queue`);
+        }
+        continue;
+      }
 
-      // Update with draft
-      updateItem(next.id, {
-        draft,
+      // Mark as ready for browser worker
+      updateItem(item.id, {
         status: "ready",
-        tweetType: classifyTweet(next.text)
+        draft: reply
       });
 
-      log(`AI reply ready for ${next.id}`);
+      stats.regenerated++;
+      console.log(`[AIWorker] Item ${item.id} ready for review`);
+
     } catch (err) {
-      console.error(`AI error for ${next.id}:`, err);
-      updateItem(next.id, {
+      console.error(`[AIWorker] Error for ${item.id}:`, err);
+      updateItem(item.id, {
         status: "failed",
-        attempts: (next.attempts || 0) + 1
+        attempts: (item.attempts || 0) + 1
       });
     }
   }

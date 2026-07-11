@@ -9,7 +9,7 @@ async function main() {
 
   // Start all workers
   runTimelineWorker(page);
-  runAIWorker(page);
+  runAIWorker();
   runBrowserWorker(page);
 }
 
