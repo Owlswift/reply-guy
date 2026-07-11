@@ -79,8 +79,8 @@ async function run() {
         continue;
       }
 
-      // Build prompt with personality
-      const prompt = buildPersonalityPrompt(details.text, relationship, tweetType);
+       // Build prompt with personality
+       const prompt = buildPersonalityPrompt(details.text, relationship, tweetType, []);
 
       // Generate reply with validation
       let reply = "";

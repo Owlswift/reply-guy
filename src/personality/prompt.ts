@@ -4,42 +4,79 @@ import { getExamples } from "./examples";
 import { Relationship } from "../relationship/types";
 import { TweetType } from "../ai/classifyTweet";
 import { ReplyMemory } from "../types/memory";
-import { formatMemories } from "../ai/formatMemories";
 
 export function buildPersonalityPrompt(
   tweet: string,
   relationship: Relationship,
-  tweetType: TweetType,
-  memories?: ReplyMemory[]
+  type: TweetType,
+  memories: ReplyMemory[]
 ): string {
-  const styleRules = style.map(s => `- ${s}`).join("\n");
-  const examples = getExamples();
-  const opening = getRandomOpening();
-  const memoryExamples = formatMemories(memories || []);
+  // Prioritize edited replies (strongest learning signal)
+  const sortedMemories = [...memories].sort((a, b) => {
+    const aEdited = a.aiDraft !== a.finalReply;
+    const bEdited = b.aiDraft !== b.finalReply;
+    if (aEdited === bEdited) return 0;
+    return aEdited ? -1 : 1;
+  });
+
+  const examples = sortedMemories
+    .slice(0, 10)
+    .map((m, index) => `
+Example ${index + 1}
+
+Original Tweet:
+${m.tweetText}
+
+My Reply:
+${m.finalReply}
+`)
+    .join("\n");
 
   return `
-You are replying from ${profile.name}'s X account.
+You are writing replies exactly as I would.
 
-Profile:
-- Profession: ${profile.profession}
-- Interests: ${profile.interests.join(", ")}
+Study my previous replies carefully.
 
-Writing Rules:
-${styleRules}
+Do NOT copy them.
 
-Examples:
+Instead learn:
+
+- my tone
+- my vocabulary
+- my sentence length
+- how I agree
+- how I disagree
+- how I joke
+- how I explain things
+
+Relationship with author:
+${relationship}
+
+Tweet type:
+${type}
+
+-------------------------
+
+Previous replies
+
 ${examples}
-${memoryExamples ? `
-Recent Replies (learn tone, never copy):
-${memoryExamples}` : ""}
 
-Relationship: ${relationship}
+-------------------------
 
-Tweet Type: ${tweetType}
+Current Tweet
 
-Tweet:
 ${tweet}
 
-Write ONE reply. Start with: "${opening}"
+Write ONE reply.
+
+Rules:
+
+- Sound human.
+- Don't sound like ChatGPT.
+- Don't over-explain.
+- Don't use hashtags.
+- Don't use emojis unless absolutely necessary.
+- Don't repeat previous replies.
+- Maximum 2–3 sentences.
 `;
 }
