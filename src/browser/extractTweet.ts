@@ -69,6 +69,7 @@ export async function extractCurrentTweet(
   const firstTime = firstDatetime ? new Date(firstDatetime).getTime() : 0;
 
   // Extract all tweets in the thread (same author, consecutive, within time window)
+  // This includes the main tweet and any self-replies
   const threadTexts: string[] = [];
   const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -84,7 +85,7 @@ export async function extractCurrentTweet(
     const authorHandle = authorHandleMatch?.[0] ?? "";
 
     if (authorHandle !== rootHandle) {
-      // Different author, stop collecting thread
+      // Different author - this is a reply from someone else, stop collecting
       break;
     }
 

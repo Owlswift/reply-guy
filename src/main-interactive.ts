@@ -14,6 +14,7 @@ import { SourceManager } from "./sources/SourceManager";
 import { HomeTimelineSource } from "./sources/HomeTimelineSource";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { deduplicateTweets } from "./sources/deduplicate";
+import { hasTweet } from "./database/tweetRepository";
 
 const DAILY_LIMIT = 40;
 
@@ -82,8 +83,13 @@ async function main() {
         continue;
       }
 
-      // Enqueue tweets (only if not already in queue)
+      // Enqueue tweets (only if not already in queue or already replied)
       for (const tweet of tweets) {
+        // Skip if already replied
+        if (hasTweet(tweet.id)) {
+          continue;
+        }
+        
         if (shouldReply(tweet)) {
           // Check if already in queue
           const existing = getQueue().find((q: QueueItem) => q.id === tweet.id);
