@@ -65,3 +65,18 @@ export async function submitReply(page: Page): Promise<boolean> {
   console.log("No post button found or all attempts failed");
   return false;
 }
+
+// Navigate to home page (for recovery when stuck)
+export async function navigateToHomeAfterPost(page: Page): Promise<void> {
+  try {
+    // Check if we're on a compose page
+    const currentUrl = page.url();
+    if (currentUrl.includes("/compose")) {
+      console.log("On compose page, navigating to home...");
+      await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+      await page.waitForLoadState("networkidle", { timeout: 15000 });
+    }
+  } catch (err) {
+    console.log(`Navigation to home failed: ${err}`);
+  }
+}

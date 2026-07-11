@@ -9,6 +9,7 @@ import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
 import { sessionManager } from "../core/sessionManager";
 import { navigateToHome } from "../browser/timeline";
+import { navigateToHomeAfterPost } from "../reply/submitReply";
 
 const memoryRepo = new MemoryRepository();
 
@@ -109,14 +110,8 @@ export async function reviewSession(
         // Navigate back to timeline (only if not in dry run mode)
         if (!process.env.DRY_RUN) {
             await page.waitForTimeout(2000);
-            try {
-                // Try goBack first, but fall back to navigateToHome if stuck
-                await page.goBack({ timeout: 5000 });
-                await page.waitForLoadState("networkidle", { timeout: 10000 });
-            } catch (err) {
-                console.log("goBack failed, navigating to home...");
-                await navigateToHome(page);
-            }
+            // Navigate to home to ensure we're back on timeline
+            await navigateToHomeAfterPost(page);
             await page.waitForTimeout(1000);
         }
 
