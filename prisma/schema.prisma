@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum TweetStatus {
@@ -49,4 +48,20 @@ model Draft {
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model Memory {
+  id          String   @id @default(cuid())
+  
+  tweetId     String
+  tweetText   String   @db.Text
+  author      String
+  relationship String
+  
+  aiDraft     String   @db.Text
+  finalReply  String   @db.Text
+  
+  approved    Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
 }

@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { ReplyMemory } from "../types/memory";
 
 export class DraftRepository {
   async hasDecision(xTweetId: string): Promise<boolean> {
@@ -49,5 +50,40 @@ export class DraftRepository {
         approved,
       },
     });
+  }
+
+  async saveMemory(memory: ReplyMemory) {
+    return prisma.memory.create({
+      data: {
+        tweetId: memory.tweetId,
+        tweetText: memory.tweetText,
+        author: memory.author,
+        relationship: memory.relationship,
+        aiDraft: memory.aiDraft,
+        finalReply: memory.finalReply,
+        approved: memory.approved,
+        createdAt: memory.createdAt,
+      }
+    });
+  }
+
+  async getRecentMemories(limit: number = 20): Promise<ReplyMemory[]> {
+    const memories = await prisma.memory.findMany({
+      where: { approved: true },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+
+    return memories.map(m => ({
+      id: m.id,
+      tweetId: m.tweetId,
+      tweetText: m.tweetText,
+      author: m.author,
+      relationship: m.relationship as any,
+      aiDraft: m.aiDraft,
+      finalReply: m.finalReply,
+      approved: m.approved,
+      createdAt: m.createdAt
+    }));
   }
 }

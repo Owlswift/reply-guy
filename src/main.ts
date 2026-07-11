@@ -79,12 +79,18 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
   });
 
   if (result.status === "posted") {
-    // Save to database
-    await draftRepo.saveDecision(
-      tweet.id,
-      result.finalReply || "",
-      true
-    );
+    // Save complete memory
+    await draftRepo.saveMemory({
+      id: "",
+      tweetId: tweet.id,
+      tweetText: details.text || tweet.text,
+      author: details.handle || tweet.author,
+      relationship: "stranger",
+      aiDraft: result.draft || "",
+      finalReply: result.finalReply || "",
+      approved: true,
+      createdAt: new Date()
+    });
   }
 
   // Go back to timeline

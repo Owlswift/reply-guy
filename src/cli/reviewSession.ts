@@ -5,7 +5,10 @@ import { prepareReply, getBrowserReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
 import { chooseReplySource } from "./conflictPrompt";
 import { confirmPost } from "./confirm";
+import { DraftRepository } from "../database/DraftRepository";
 import { Relationship } from "../relationship/types";
+
+const draftRepo = new DraftRepository();
 
 export interface ReviewSessionResult {
     status: "posted" | "skipped" | "cancelled";
@@ -25,7 +28,14 @@ export async function reviewSession(
     page: Page,
     details: ReviewSessionDetails
 ): Promise<ReviewSessionResult> {
-    const prompt = buildPrompt(details.text, details.relationship);
+    // Load recent memories for learning
+    const memories = await draftRepo.getRecentMemories(20);
+    
+    const prompt = buildPrompt({
+        tweet: details.text,
+        relationship: details.relationship,
+        memories
+    });
 
     // Use existing draft if available, otherwise generate
     let draft = details.existingDraft ?? await generateReply(prompt);
