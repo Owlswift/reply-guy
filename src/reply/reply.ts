@@ -9,11 +9,9 @@ export async function prepareReply(
   page: Page,
   reply: string
 ): Promise<void> {
-  console.log("[Reply] Opening reply box...");
   // Click the reply button
   await openReplyBox(page);
 
-  console.log("[Reply] Typing reply...");
   // Type the reply
   await typeReply(page, reply);
 }
@@ -32,7 +30,6 @@ export async function clickReply(
   page: Page,
   author: string = ""
 ): Promise<boolean> {
-  console.log("[Reply] Submitting reply...");
   // Submit (or just log in dry-run mode)
   const success = await submitReply(page);
 
@@ -45,7 +42,6 @@ export async function clickReply(
     time: new Date().toISOString()
   });
 
-  console.log(`[Reply] Submit result: ${success ? "success" : "failed"}`);
   return success;
 }
 
@@ -55,15 +51,12 @@ export async function replyToTweet(
   reply: string,
   author: string = ""
 ): Promise<boolean> {
-  console.log("[Reply] Opening reply box...");
   // Click the reply button
   await openReplyBox(page);
 
-  console.log("[Reply] Typing reply...");
   // Type the reply
   await typeReply(page, reply);
 
-  console.log("[Reply] Submitting reply...");
   // Submit (or just log in dry-run mode)
   const success = await submitReply(page);
 
@@ -76,7 +69,6 @@ export async function replyToTweet(
     time: new Date().toISOString()
   });
 
-  console.log(`[Reply] Submit result: ${success ? "success" : "failed"}`);
   return success;
 }
 
@@ -87,6 +79,5 @@ export async function verifyPostButton(page: Page): Promise<number> {
   const tweetButton = await page.locator('[data-testid="tweetButton"]').count();
   const tweetButtonInline = await page.locator('[data-testid="tweetButtonInline"]').count();
   
-  console.log(`[Reply] Found ${sendButton + tweetButton + tweetButtonInline} post buttons`);
   return sendButton + tweetButton + tweetButtonInline;
 }

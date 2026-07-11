@@ -20,23 +20,17 @@ export class SourceManager {
 
         for (const source of this.sources) {
 
-            console.log(`[SourceManager] Checking ${source.name}...`);
-
             try {
 
                 const result =
                     await source.getTweets(page);
-
-                console.log(
-                    `[SourceManager] ${source.name}: ${result.length} tweets`
-                );
 
                 tweets.push(...result);
 
             } catch (err) {
 
                 console.error(
-                    `[SourceManager] ${source.name} failed`,
+                    `${source.name} failed`,
                     err
                 );
 

@@ -34,7 +34,7 @@ export async function runBrowserWorker(page: Page): Promise<void> {
 
     try {
       // Open the tweet first (needed for reply box)
-      log(`Browser opening tweet ${item.id}`);
+      log(`Opening tweet ${item.id}`);
       stats.tweets++;
       await openTweet(page, item.url);
 
