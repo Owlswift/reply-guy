@@ -1,9 +1,19 @@
-import { buildPrompt } from "./buildPrompt";
+import { buildPrompt, PromptInput } from "./buildPrompt";
 import { Relationship } from "../relationship/types";
+import { ReplyMemory } from "../types/memory";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 
-export async function generateReply(tweet: string, relationship: Relationship = "stranger") {
+export async function generateReply(
+  input: PromptInput | string,
+  relationship: Relationship = "stranger",
+  memories: ReplyMemory[] = []
+) {
+  // Support both old and new API
+  const prompt = typeof input === "string"
+    ? buildPrompt({ tweet: input, relationship, memories })
+    : buildPrompt(input);
+
   const response = await fetch(OLLAMA_URL, {
     method: "POST",
     headers: {
@@ -12,7 +22,7 @@ export async function generateReply(tweet: string, relationship: Relationship = 
     body: JSON.stringify({
       model: "qwen3:8b",
       stream: false,
-      prompt: buildPrompt(tweet, relationship),
+      prompt,
     }),
   });
 

@@ -51,7 +51,7 @@ async function checkStartup(page: any) {
 
   // Check database
   try {
-    await memoryRepo.hasDecision("test");
+    await memoryRepo.hasMemory("test");
     console.log("✓ Database ready");
   } catch (err) {
     console.log("✗ Database connection failed");
@@ -127,7 +127,7 @@ async function main() {
 
       for (const tweet of tweets) {
         // Skip if already replied
-        const alreadyReplied = await memoryRepo.hasDecision(tweet.id);
+        const alreadyReplied = await memoryRepo.hasMemory(tweet.id);
         if (alreadyReplied) {
           continue;
         }

@@ -2,58 +2,15 @@ import { prisma } from "./prisma";
 import { ReplyMemory } from "../types/memory";
 
 export class MemoryRepository {
-  async hasDecision(xTweetId: string): Promise<boolean> {
-    const tweet = await prisma.tweet.findUnique({
-      where: { tweetId: xTweetId }
+  async hasMemory(tweetId: string): Promise<boolean> {
+    const memory = await prisma.replyMemory.findFirst({
+      where: { tweetId }
     });
-    if (!tweet) return false;
-    
-    const draft = await prisma.draft.findUnique({
-      where: { tweetId: tweet.id }
-    });
-    return !!draft;
-  }
-
-  async saveDecision(
-    xTweetId: string,
-    reply: string,
-    approved: boolean
-  ) {
-    // First, find or create the Tweet record
-    const tweet = await prisma.tweet.upsert({
-      where: {
-        tweetId: xTweetId,
-      },
-      update: {},
-      create: {
-        tweetId: xTweetId,
-        authorId: "unknown",
-        authorHandle: "unknown",
-        text: "Unknown tweet",
-      },
-    });
-
-    // Then upsert the draft
-    return prisma.draft.upsert({
-      where: {
-        tweetId: tweet.id,
-      },
-      update: {
-        reply,
-        approved,
-      },
-      create: {
-        tweetId: tweet.id,
-        reply,
-        confidence: 95,
-        reason: "Pending",
-        approved,
-      },
-    });
+    return !!memory;
   }
 
   async saveMemory(memory: ReplyMemory) {
-    return prisma.memory.create({
+    return prisma.replyMemory.create({
       data: {
         tweetId: memory.tweetId,
         tweetText: memory.tweetText,
@@ -68,13 +25,13 @@ export class MemoryRepository {
   }
 
   async getRecentMemories(limit: number = 20): Promise<ReplyMemory[]> {
-    const memories = await prisma.memory.findMany({
+    const memories = await prisma.replyMemory.findMany({
       where: { approved: true },
       orderBy: { createdAt: 'desc' },
       take: limit
     });
 
-    return memories.map(m => ({
+    return memories.map((m: any) => ({
       id: m.id,
       tweetId: m.tweetId,
       tweetText: m.tweetText,

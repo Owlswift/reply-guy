@@ -50,7 +50,7 @@ model Draft {
   updatedAt   DateTime @updatedAt
 }
 
-model Memory {
+model replyMemory {
   id          String   @id @default(cuid())
   
   tweetId     String
