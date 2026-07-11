@@ -55,7 +55,7 @@ async function main() {
       // Check if we should refresh the session
       if (shouldRefreshSession()) {
         log("Refreshing session...");
-        await page.goto("https://x.com/notifications", {
+        await page.goto("https://x.com/i/timeline", {
           waitUntil: "networkidle"
         });
         markSessionRefreshed();
@@ -86,7 +86,7 @@ async function main() {
       // Check if timeline is stuck
       if (timelineLooksStuck()) {
         log("Timeline appears stuck. Refreshing...");
-        await page.goto("https://x.com/notifications", {
+        await page.goto("https://x.com/i/timeline", {
           waitUntil: "networkidle"
         });
         resetTimelineState();
@@ -137,8 +137,8 @@ async function main() {
       await page.waitForTimeout(waitTime);
     } catch (err) {
       console.error("Error in main loop:", err);
-      log("Recovering by going to notifications...");
-      await page.goto("https://x.com/notifications");
+      log("Recovering by going to i/timeline...");
+      await page.goto("https://x.com/i/timeline");
       await page.waitForTimeout(5000);
     }
   }

@@ -59,24 +59,14 @@ export async function submitReply(page: Page): Promise<boolean> {
   return false;
 }
 
-// Navigate to notifications feed (for recovery when stuck)
+// Navigate to the filtered timeline (for recovery when stuck)
 export async function navigateToHomeAfterPost(page: Page): Promise<void> {
   try {
-    // Check if we're on a compose page
-    const currentUrl = page.url();
-    if (currentUrl.includes("/compose")) {
-      await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded", timeout: 10000 });
-      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {
-        // waitForLoadState timed out, but navigation may have succeeded
-      });
-    } else {
-      // Also navigate to notifications if not on compose page (for safety)
-      await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded", timeout: 10000 });
-      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {
-        // waitForLoadState timed out, but navigation may have succeeded
-      });
-    }
+    await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded", timeout: 10000 });
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {
+      // waitForLoadState timed out, but navigation may have succeeded
+    });
   } catch {
-    // Navigation to notifications failed
+    // Navigation to i/timeline failed
   }
 }

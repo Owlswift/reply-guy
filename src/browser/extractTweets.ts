@@ -8,6 +8,15 @@ export async function extractTweets(
     source: TweetSourceType = "timeline"
 ): Promise<TimelineTweet[]> {
 
+    // For notifications source, only extract from the i/timeline page
+    if (source === "notifications") {
+        const currentUrl = page.url();
+        if (!currentUrl.includes("/i/timeline")) {
+            console.log(`Not on i/timeline page (${currentUrl}), navigating...`);
+            await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded" });
+        }
+    }
+
     // Wait for timeline to load
     try {
         await page.waitForSelector("article", { timeout: 10000 });

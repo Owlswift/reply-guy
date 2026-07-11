@@ -33,9 +33,9 @@ export class NotificationFeedSource {
     }
 
     async returnToPostsFeed(page: Page): Promise<void> {
-        // Navigate directly to notifications feed
+        // Navigate directly to the filtered posts timeline
         try {
-            await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded", timeout: 10000 });
+            await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded", timeout: 10000 });
             // Wait for articles to be ready
             await page.waitForSelector("article", { timeout: 5000 });
         } catch {

@@ -29,6 +29,11 @@ export async function openNotificationFeed(page: Page) {
     const count = await card.count();
 
     if (count === 0) {
+        // No notification card — check if we're already on the i/timeline page
+        const currentUrl = page.url();
+        if (currentUrl.includes("/i/timeline")) {
+            return true;
+        }
         return true;
     }
 
@@ -39,13 +44,27 @@ export async function openNotificationFeed(page: Page) {
         return true;
     }
 
-    // Wait for the Posts feed to open
+    // Wait for the Posts feed to open and verify we're on i/timeline
     try {
         await page.locator("article").first().waitFor({
             timeout: 5000
         });
     } catch {
         return false;
+    }
+
+    // Verify we landed on the i/timeline page (the filtered posts feed)
+    const finalUrl = page.url();
+    if (!finalUrl.includes("/i/timeline")) {
+        console.log("Did not land on i/timeline page, navigating directly...");
+        await page.goto("https://x.com/i/timeline", {
+            waitUntil: "domcontentloaded",
+        });
+        try {
+            await page.locator("article").first().waitFor({ timeout: 10000 });
+        } catch {
+            return false;
+        }
     }
 
     return true;
