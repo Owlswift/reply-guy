@@ -2,22 +2,29 @@ import { Page } from "playwright";
 import { sessionManager } from "../core/sessionManager";
 
 export interface TimelineTweet {
-  id: string;
-  author: string;
-  username: string;
-  text: string;
-  url: string;
-  verified: boolean;
-  following: boolean;
-  followsYou: boolean;
-  likes: number;
-  replies: number;
-  reposts: number;
+    id: string;
+    author: string;
+    username: string;
+    text: string;
+    url: string;
+    verified: boolean;
+    following: boolean;
+    followsYou: boolean;
+    likes: number;
+    replies: number;
+    reposts: number;
+}
+
+// Navigate to home page (for reload functionality)
+export async function navigateToHome(page: Page): Promise<void> {
+    console.log("Navigating to home page...");
+    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle", { timeout: 15000 });
 }
 
 export async function getTimelineTweets(
-  page: Page,
-  limit = 30
+    page: Page,
+    limit = 30
 ): Promise<TimelineTweet[]> {
   // If in review mode, we should be on a tweet page - don't navigate away!
   if (sessionManager.isReviewing()) {

@@ -11,7 +11,8 @@ export interface ReviewResult {
         | "edit"
         | "regenerate"
         | "skip"
-        | "quit";
+        | "quit"
+        | "reload";
     reply: string;
 }
 
@@ -53,6 +54,10 @@ export async function reviewReply(
     
     if (action === "quit") {
         process.exit(0);
+    }
+
+    if (action === "reload") {
+        return { action: "reload", reply: draft };
     }
 
     return { action: "skip", reply: draft };

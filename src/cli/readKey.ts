@@ -5,12 +5,13 @@ export type Action =
     | "edit"
     | "regenerate"
     | "skip"
-    | "quit";
+    | "quit"
+    | "reload";
 
 export function readAction(): Action {
     while (true) {
         const key = readlineSync
-            .question("\n[a]pprove [e]dit [r]egen [s]kip [q]uit: ")
+            .question("\n[a]pprove [e]dit [r]egen [s]kip [l]oad [q]uit: ")
             .trim()
             .toLowerCase();
 
@@ -23,6 +24,8 @@ export function readAction(): Action {
                 return "regenerate";
             case "s":
                 return "skip";
+            case "l":
+                return "reload";
             case "q":
                 return "quit";
             default:

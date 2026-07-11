@@ -8,6 +8,7 @@ import { confirmPost } from "./confirm";
 import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
 import { sessionManager } from "../core/sessionManager";
+import { navigateToHome } from "../browser/timeline";
 
 const memoryRepo = new MemoryRepository();
 
@@ -54,26 +55,32 @@ export async function reviewSession(
                 terminalReply
             );
 
-            switch (review.action) {
-                case "edit":
-                    terminalReply = review.reply;
-                    continue;
+        switch (review.action) {
+            case "edit":
+                terminalReply = review.reply;
+                continue;
 
-                case "regenerate":
-                    draft = await generateReply(prompt);
-                    terminalReply = draft;
-                    // Return regen status to signal browser worker to put back in queue
-                    return { status: "regen", draft };
+            case "regenerate":
+                draft = await generateReply(prompt);
+                terminalReply = draft;
+                // Return regen status to signal browser worker to put back in queue
+                return { status: "regen", draft };
 
-                case "skip":
-                    return { status: "skipped" };
+            case "skip":
+                return { status: "skipped" };
 
-                case "quit":
-                    process.exit(0);
+            case "quit":
+                process.exit(0);
 
-                case "approve":
-                    break;
-            }
+            case "reload":
+                // Navigate to home page to reset state
+                console.log("Reloading to home page...");
+                await navigateToHome(page);
+                return { status: "cancelled" };
+
+            case "approve":
+                break;
+        }
 
             break;
         }
