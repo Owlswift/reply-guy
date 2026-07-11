@@ -57,7 +57,8 @@ async function run() {
       // Build TimelineTweet for decision engine with relationship info
       const timelineTweet = {
         ...tweet,
-        verified: relationship === "verified"
+        verified: relationship === "verified",
+        source: "timeline" as const
       };
 
       // Decide whether to reply

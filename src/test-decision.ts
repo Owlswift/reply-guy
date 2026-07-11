@@ -13,7 +13,8 @@ const verifiedTweet: TimelineTweet = {
   followsYou: false,
   likes: 0,
   replies: 0,
-  reposts: 0
+  reposts: 0,
+  source: "timeline"
 };
 
 console.log("Verified tweet:", shouldReply(verifiedTweet));
@@ -30,7 +31,8 @@ const strangerTweet: TimelineTweet = {
   followsYou: false,
   likes: 0,
   replies: 0,
-  reposts: 0
+  reposts: 0,
+  source: "timeline"
 };
 
 console.log("Stranger tweet:", shouldReply(strangerTweet));
@@ -47,7 +49,8 @@ const spamTweet: TimelineTweet = {
   followsYou: false,
   likes: 0,
   replies: 0,
-  reposts: 0
+  reposts: 0,
+  source: "timeline"
 };
 
 console.log("Spam tweet:", shouldReply(spamTweet));

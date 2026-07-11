@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { getPage } from "./browser/browser";
-import { getTimelineTweets } from "./browser/timeline";
 import { shouldReply } from "./filter/filterTweet";
 import { scrollTimeline } from "./browser/scroll";
 import { log } from "./utils/logger";
@@ -11,6 +10,10 @@ import { enqueue, queueSize, getQueue, QueueItem } from "./core/queue";
 import { runAIWorker } from "./workers/aiWorker";
 import { runBrowserWorker } from "./workers/browserWorker";
 import { sessionManager } from "./core/sessionManager";
+import { SourceManager } from "./sources/SourceManager";
+import { HomeTimelineSource } from "./sources/HomeTimelineSource";
+import { NotificationFeedSource } from "./sources/NotificationFeedSource";
+import { deduplicateTweets } from "./sources/deduplicate";
 
 const DAILY_LIMIT = 40;
 
@@ -26,6 +29,12 @@ async function main() {
   // Start workers
   runAIWorker(page);
   runBrowserWorker(page);
+
+  // Define source manager
+  const sourceManager = new SourceManager([
+    new NotificationFeedSource(),
+    new HomeTimelineSource()
+  ]);
 
   while (replyCount < DAILY_LIMIT) {
     // Check if review session is active - if so, wait
@@ -50,9 +59,15 @@ async function main() {
         markSessionRefreshed();
       }
 
-      // Get timeline tweets
-      log("Reading timeline...");
-      const tweets = await getTimelineTweets(page);
+      // Get tweets from all sources
+      const rawTweets = await sourceManager.getTweets(page);
+
+      // Deduplicate tweets
+      const tweets = deduplicateTweets(rawTweets);
+
+      // Log statistics
+      const duplicateCount = rawTweets.length - tweets.length;
+      log(`Merged: ${tweets.length} tweets, ${duplicateCount} duplicates removed`);
 
       // Update timeline state
       updateTimeline(tweets.map(t => t.id));

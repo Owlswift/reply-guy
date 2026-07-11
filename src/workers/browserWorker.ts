@@ -1,5 +1,6 @@
 import { peek, dequeue, updateItem } from "../core/queue";
 import { openTweet } from "../browser/openTweet";
+import { extractCurrentTweet } from "../browser/extractTweet";
 import { markReplied } from "../storage/repliedTweets";
 import { log } from "../utils/logger";
 import { Page } from "playwright";
@@ -37,16 +38,19 @@ export async function runBrowserWorker(page: Page): Promise<void> {
       stats.tweets++;
       await openTweet(page, item.url);
 
+      // Extract current tweet details (including full thread)
+      const details = await extractCurrentTweet(page);
+
       // Run the review session (which will open the reply box when approved)
-      const details: ReviewSessionDetails = {
+      const reviewDetails: ReviewSessionDetails = {
         id: item.id,
-        author: item.author,
-        text: item.text,
+        author: details.handle || item.author,
+        text: details.fullText || details.text || item.text,
         relationship: item.relationship || "stranger",
         existingDraft: item.draft
       };
       
-      const result = await reviewSession(page, details);
+      const result = await reviewSession(page, reviewDetails);
 
       if (result.status === "posted") {
         // Mark as replied

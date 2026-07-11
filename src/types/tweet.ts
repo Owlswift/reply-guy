@@ -6,6 +6,8 @@ export interface Tweet {
   createdAt: Date;
 }
 
+export type TweetSourceType = "notifications" | "timeline" | "watchlist";
+
 export interface TimelineTweet {
   id: string;
   author: string;
@@ -18,4 +20,5 @@ export interface TimelineTweet {
   likes: number;
   replies: number;
   reposts: number;
+  source: TweetSourceType;
 }
