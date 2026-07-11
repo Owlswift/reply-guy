@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { ReplyMemory } from "../types/memory";
 
-export class DraftRepository {
+export class MemoryRepository {
   async hasDecision(xTweetId: string): Promise<boolean> {
     const tweet = await prisma.tweet.findUnique({
       where: { tweetId: xTweetId }

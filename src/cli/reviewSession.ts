@@ -5,10 +5,10 @@ import { prepareReply, getBrowserReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
 import { chooseReplySource } from "./conflictPrompt";
 import { confirmPost } from "./confirm";
-import { DraftRepository } from "../database/DraftRepository";
+import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
 
-const draftRepo = new DraftRepository();
+const memoryRepo = new MemoryRepository();
 
 export interface ReviewSessionResult {
     status: "posted" | "skipped" | "cancelled";
@@ -29,7 +29,7 @@ export async function reviewSession(
     details: ReviewSessionDetails
 ): Promise<ReviewSessionResult> {
     // Load recent memories for learning
-    const memories = await draftRepo.getRecentMemories(20);
+    const memories = await memoryRepo.getRecentMemories(20);
     
     const prompt = buildPrompt({
         tweet: details.text,

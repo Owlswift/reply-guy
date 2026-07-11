@@ -6,11 +6,11 @@ import { backToTimeline } from "./reply/backToTimeline";
 import { isLoggedIn } from "./browser/isLoggedIn";
 import { log } from "./utils/logger";
 import { reviewSession } from "./cli/reviewSession";
-import { DraftRepository } from "./database/DraftRepository";
+import { MemoryRepository } from "./database/MemoryRepository";
 import { shouldReply } from "./filter/filterTweet";
 import { scrollTimeline } from "./browser/scroll";
 
-const draftRepo = new DraftRepository();
+const memoryRepo = new MemoryRepository();
 
 // Startup checks
 async function checkStartup(page: any) {
@@ -51,7 +51,7 @@ async function checkStartup(page: any) {
 
   // Check database
   try {
-    await draftRepo.hasDecision("test");
+    await memoryRepo.hasDecision("test");
     console.log("✓ Database ready");
   } catch (err) {
     console.log("✗ Database connection failed");
@@ -80,7 +80,7 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
 
   if (result.status === "posted") {
     // Save complete memory
-    await draftRepo.saveMemory({
+    await memoryRepo.saveMemory({
       id: "",
       tweetId: tweet.id,
       tweetText: details.text || tweet.text,
@@ -127,7 +127,7 @@ async function main() {
 
       for (const tweet of tweets) {
         // Skip if already replied
-        const alreadyReplied = await draftRepo.hasDecision(tweet.id);
+        const alreadyReplied = await memoryRepo.hasDecision(tweet.id);
         if (alreadyReplied) {
           continue;
         }
