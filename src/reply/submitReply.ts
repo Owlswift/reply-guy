@@ -73,8 +73,17 @@ export async function navigateToHomeAfterPost(page: Page): Promise<void> {
     const currentUrl = page.url();
     if (currentUrl.includes("/compose")) {
       console.log("On compose page, navigating to home...");
-      await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
-      await page.waitForLoadState("networkidle", { timeout: 15000 });
+      await page.goto("https://x.com/home", { waitUntil: "domcontentloaded", timeout: 10000 });
+      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {
+        console.log("waitForLoadState timed out, but navigation may have succeeded");
+      });
+    } else {
+      // Also navigate to home if not on compose page (for safety)
+      console.log("Navigating to home...");
+      await page.goto("https://x.com/home", { waitUntil: "domcontentloaded", timeout: 10000 });
+      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {
+        console.log("waitForLoadState timed out, but navigation may have succeeded");
+      });
     }
   } catch (err) {
     console.log(`Navigation to home failed: ${err}`);
