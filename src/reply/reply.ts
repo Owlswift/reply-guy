@@ -4,6 +4,48 @@ import { typeReply } from "./typeReply";
 import { submitReply } from "./submitReply";
 import { logReply } from "../core/logger";
 
+// Fill the reply textbox (without submitting)
+export async function prepareReply(
+  page: Page,
+  reply: string
+): Promise<void> {
+  // Click the reply button
+  await openReplyBox(page);
+
+  // Type the reply
+  await typeReply(page, reply);
+}
+
+// Read the current text from the browser's reply box
+export async function getBrowserReply(page: Page): Promise<string> {
+  const editor = page.locator(
+    '[data-testid="tweetTextarea_0"]'
+  );
+
+  return (await editor.innerText()).trim();
+}
+
+// Submit the reply (click the button)
+export async function clickReply(
+  page: Page,
+  author: string = ""
+): Promise<boolean> {
+  // Submit (or just log in dry-run mode)
+  const success = await submitReply(page);
+
+  // Log the result
+  logReply({
+    tweet: page.url(),
+    author,
+    reply: "",
+    success,
+    time: new Date().toISOString()
+  });
+
+  return success;
+}
+
+// Original function for backward compatibility
 export async function replyToTweet(
   page: Page,
   reply: string,

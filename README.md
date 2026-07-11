@@ -39,10 +39,29 @@ src/
 
 This cuts API costs by ~80%.
 
+## Setup
+
+Run the setup script to start prerequisites:
+
+```bash
+npm run setup
+```
+
+This will:
+- Start the Ollama server in the background
+- Remind you to ensure the qwen3:8b model is available
+- Display instructions for starting Chrome with remote debugging
+
+**Note:** Chrome must be started manually in a separate terminal before running the bot:
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile
+```
+
 ## Run
 
 ```bash
-npm run evaluate
+npm run start:runner
 ```
 
 ## Swap implementations

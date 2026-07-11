@@ -14,6 +14,9 @@ importers:
       '@prisma/client':
         specifier: ^7.8.0
         version: 7.8.0(prisma@7.8.0(@types/react@19.2.17)(better-sqlite3@12.11.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@7.0.2))(typescript@7.0.2)
+      chalk:
+        specifier: ^5.6.2
+        version: 5.6.2
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -38,6 +41,9 @@ importers:
       prompts:
         specifier: ^2.4.2
         version: 2.4.2
+      readline-sync:
+        specifier: ^1.4.10
+        version: 1.4.10
       twitter-api-v2:
         specifier: ^1.29.0
         version: 1.29.0
@@ -629,6 +635,10 @@ packages:
   call-bound@1.0.4:
     resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
     engines: {node: '>= 0.4'}
+
+  chalk@5.6.2:
+    resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
+    engines: {node: ^12.17.0 || ^14.13 || >=16.0.0}
 
   chart.js@4.5.1:
     resolution: {integrity: sha512-GIjfiT9dbmHRiYi6Nl2yFCq7kkwdkp1W/lp2J99rX0yo9tgJGn3lKQATztIjb5tVtevcBtIdICNWqlq5+E8/Pw==}
@@ -1223,6 +1233,10 @@ packages:
   readdirp@5.0.0:
     resolution: {integrity: sha512-9u/XQ1pvrQtYyMpZe7DXKv2p5CNvyVwzUB6uhLAnQwHMSgKMBR62lc7AHljaeteeHXn11XTAaLLUVZYVZyuRBQ==}
     engines: {node: '>= 20.19.0'}
+
+  readline-sync@1.4.10:
+    resolution: {integrity: sha512-gNva8/6UAe8QYepIQH/jQ2qn91Qj0B9sYjMBBs3QOB8F2CXcKgLxQaJRP76sWVRQt+QU+8fAkCbCvjjMFu7Ycw==}
+    engines: {node: '>= 0.8.0'}
 
   remeda@2.33.4:
     resolution: {integrity: sha512-ygHswjlc/opg2VrtiYvUOPLjxjtdKvjGz1/plDhkG66hjNjFr1xmfrs2ClNFo/E6TyUFiwYNh53bKV26oBoMGQ==}
@@ -1889,6 +1903,8 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
 
+  chalk@5.6.2: {}
+
   chart.js@4.5.1:
     dependencies:
       '@kurkle/color': 0.3.4
@@ -2464,6 +2480,8 @@ snapshots:
       picomatch: 2.3.2
 
   readdirp@5.0.0: {}
+
+  readline-sync@1.4.10: {}
 
   remeda@2.33.4: {}
 

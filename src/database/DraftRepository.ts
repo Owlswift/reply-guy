@@ -1,6 +1,18 @@
 import { prisma } from "./prisma";
 
 export class DraftRepository {
+  async hasDecision(xTweetId: string): Promise<boolean> {
+    const tweet = await prisma.tweet.findUnique({
+      where: { tweetId: xTweetId }
+    });
+    if (!tweet) return false;
+    
+    const draft = await prisma.draft.findUnique({
+      where: { tweetId: tweet.id }
+    });
+    return !!draft;
+  }
+
   async saveDecision(
     xTweetId: string,
     reply: string,

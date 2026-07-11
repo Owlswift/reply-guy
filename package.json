@@ -3,11 +3,24 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
+    "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
+    "start:runner": "tsx src/runner.ts",
+    "start:interactive": "tsx src/main-interactive.ts",
+    "setup": "bash scripts/setup.sh",
     "build": "tsc",
-    "evaluate": "tsx src/main.ts"
+    "evaluate": "tsx src/main.ts",
+    "test": "tsx src/test-simple.ts",
+    "test:db": "tsx src/test-db.ts",
+    "test:decision": "tsx src/test-decision.ts",
+    "test:connection": "tsx src/test-connection.ts",
+    "test:browser": "tsx src/browser/test.ts",
+    "test:ai": "tsx src/ai/test.ts",
+    "test:reply": "tsx src/reply/test.ts",
+    "test:scraper": "tsx src/scraper/test.ts",
+    "test:twitter": "tsx src/twitter/test.ts",
+    "test:twitter-mentions": "tsx src/twitter/test-mentions.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +29,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "chalk": "^5.6.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "ollama": "^0.6.3",
@@ -24,6 +38,7 @@
     "playwright": "^1.61.1",
     "prisma": "^7.8.0",
     "prompts": "^2.4.2",
+    "readline-sync": "^1.4.10",
     "twitter-api-v2": "^1.29.0",
     "zod": "^4.4.3"
   },
