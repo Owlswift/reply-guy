@@ -109,8 +109,14 @@ export async function reviewSession(
         // Navigate back to timeline (only if not in dry run mode)
         if (!process.env.DRY_RUN) {
             await page.waitForTimeout(2000);
-            await page.goBack();
-            await page.waitForLoadState("networkidle", { timeout: 15000 });
+            try {
+                // Try goBack first, but fall back to navigateToHome if stuck
+                await page.goBack({ timeout: 5000 });
+                await page.waitForLoadState("networkidle", { timeout: 10000 });
+            } catch (err) {
+                console.log("goBack failed, navigating to home...");
+                await navigateToHome(page);
+            }
             await page.waitForTimeout(1000);
         }
 

@@ -42,7 +42,7 @@ export async function submitReply(page: Page): Promise<boolean> {
         // Wait for composer to close (indicates success)
         // Use a short timeout and don't fail if it doesn't close
         // This is a non-fatal check - the post may still have succeeded
-        page.waitForSelector(
+        await page.waitForSelector(
           '[data-testid="tweetTextarea_0"]',
           {
             state: "hidden",
