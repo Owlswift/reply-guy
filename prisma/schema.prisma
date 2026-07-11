@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 enum TweetStatus {
@@ -23,57 +23,57 @@ enum Relationship {
 }
 
 model Tweet {
-  id            String      @id @default(cuid())
-  tweetId       String      @unique
-  authorId      String
-  authorHandle  String
-  text          String      @db.Text
+  id           String      @id @default(cuid())
+  tweetId      String      @unique
+  authorId     String
+  authorHandle String
+  text         String
 
   conversationId String?
   createdAtX     DateTime?
 
-  status        TweetStatus @default(NEW)
+  status TweetStatus @default(NEW)
 
-  draft         Draft?
+  draft Draft?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Draft {
-  id          String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  tweet       Tweet    @relation(fields: [tweetId], references: [id], onDelete: Cascade)
-  tweetId     String   @unique
+  tweet   Tweet  @relation(fields: [tweetId], references: [id], onDelete: Cascade)
+  tweetId String @unique
 
-  reply       String   @db.Text
+  reply String
 
   confidence  Int
   reason      String
 
-  approved    Boolean  @default(false)
-  posted      Boolean  @default(false)
+  approved Boolean @default(false)
+  posted   Boolean @default(false)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ReplyMemory {
   id          String   @id @default(cuid())
 
-  tweetId     String   @unique
-  tweetText   String   @db.Text
+  tweetId      String   @unique
+  tweetText    String
   authorHandle String
   relationship Relationship
 
-  aiDraft     String   @db.Text
-  editedReply String?  @db.Text
-  finalReply  String   @db.Text
+  aiDraft     String
+  editedReply String?
+  finalReply  String
 
-  wasEdited   Boolean  @default(false)
-  approved    Boolean  @default(false)
+  wasEdited Boolean @default(false)
+  approved  Boolean @default(false)
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([createdAt])
 }
