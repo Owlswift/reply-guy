@@ -2,6 +2,7 @@ import { peek, dequeue, updateItem } from "../core/queue";
 import { openTweet } from "../browser/openTweet";
 import { extractCurrentTweet } from "../browser/extractTweet";
 import { markReplied } from "../storage/repliedTweets";
+import { markNotificationReplied, getNotificationProgress } from "../storage/seenNotifications";
 import { log } from "../utils/logger";
 import { Page } from "playwright";
 import { reviewSession, ReviewSessionDetails } from "../cli/reviewSession";
@@ -55,13 +56,17 @@ export async function runBrowserWorker(page: Page): Promise<void> {
       if (result.status === "posted") {
         // Mark as replied
         markReplied(item.id);
+        markNotificationReplied(item.id);
         
         // Remove from queue
         dequeue();
 
         stats.posted++;
 
-        console.log("\n✅ Reply posted.\n");
+        // Show updated progress
+        const progress = getNotificationProgress();
+        const remaining = progress.total - progress.replied;
+        console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
       } else if (result.status === "skipped") {
         // Remove from queue without replying
         dequeue();

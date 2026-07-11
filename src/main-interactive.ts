@@ -15,6 +15,7 @@ import { HomeTimelineSource } from "./sources/HomeTimelineSource";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { deduplicateTweets } from "./sources/deduplicate";
 import { hasTweet } from "./database/tweetRepository";
+import { markNotificationSeen, getNotificationProgress } from "./storage/seenNotifications";
 
 const DAILY_LIMIT = 40;
 
@@ -70,6 +71,15 @@ async function main() {
       const duplicateCount = rawTweets.length - tweets.length;
       log(`Merged: ${tweets.length} tweets, ${duplicateCount} duplicates removed`);
 
+      // Log each extracted post with its URL
+      if (tweets.length > 0) {
+        console.log("\n📋 Extracted posts:");
+        for (const t of tweets) {
+          console.log(`   [${t.id}] ${t.author} — ${t.url}`);
+        }
+        console.log();
+      }
+
       // Update timeline state
       updateTimeline(tweets.map(t => t.id));
 
@@ -105,7 +115,15 @@ async function main() {
             enqueue(item);
           }
         }
+
+        // Mark tweet as seen in persistent storage so it's never re-processed
+        markNotificationSeen(tweet.id, tweet.url);
       }
+
+      // Show progress summary after processing all tweets
+      const progress = getNotificationProgress();
+      const remaining = progress.total - progress.replied;
+      console.log(`📊 Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)`);
 
       // Keep queue topped up
       if (queueSize() < 10) {

@@ -12,5 +12,7 @@ chrome-profile/
 
 # Runtime data files
 echo.db
+echo.db-shm
+echo.db-wal
 repliedTweets.json
 replies.log

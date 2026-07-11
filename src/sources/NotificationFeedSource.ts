@@ -1,12 +1,12 @@
 import { Page } from "playwright";
 import { openNotificationFeed } from "../browser/openNotificationFeed";
 import { extractTweets } from "../browser/extractTweets";
+import { markNotificationSeen, isNotificationSeen } from "../storage/seenNotifications";
 
 export class NotificationFeedSource {
 
     name = "Notifications";
 
-    private processedTweetIds: Set<string> = new Set();
     private isActive: boolean = false;
 
     async getTweets(page: Page) {
@@ -20,16 +20,16 @@ export class NotificationFeedSource {
 
         const tweets = await extractTweets(page, "notifications");
         
-        // Filter out already processed tweets
-        return tweets.filter(tweet => !this.processedTweetIds.has(tweet.id));
+        // Filter out already processed tweets using persistent storage
+        return tweets.filter(tweet => !isNotificationSeen(tweet.id));
     }
 
-    markProcessed(tweetId: string): void {
-        this.processedTweetIds.add(tweetId);
+    markProcessed(tweetId: string, tweetUrl: string): void {
+        markNotificationSeen(tweetId, tweetUrl);
     }
 
     isProcessed(tweetId: string): boolean {
-        return this.processedTweetIds.has(tweetId);
+        return isNotificationSeen(tweetId);
     }
 
     async returnToPostsFeed(page: Page): Promise<void> {
@@ -47,7 +47,6 @@ export class NotificationFeedSource {
 
     close(): void {
         this.isActive = false;
-        this.processedTweetIds.clear();
     }
 
 }
