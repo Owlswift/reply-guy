@@ -63,8 +63,14 @@ export async function extractCurrentTweet(
   const handleMatch = firstAuthor.match(/@\w+/);
   const rootHandle = handleMatch?.[0] ?? "";
 
-  // Extract all tweets in the thread (same author, consecutive)
+  // Get the timestamp of the first article
+  const firstTimeElement = await firstArticle.locator("time").first();
+  const firstDatetime = (await firstTimeElement.getAttribute("datetime"))?.trim() ?? "";
+  const firstTime = firstDatetime ? new Date(firstDatetime).getTime() : 0;
+
+  // Extract all tweets in the thread (same author, consecutive, within time window)
   const threadTexts: string[] = [];
+  const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
   for (const article of articles) {
     const author =
@@ -80,6 +86,18 @@ export async function extractCurrentTweet(
     if (authorHandle !== rootHandle) {
       // Different author, stop collecting thread
       break;
+    }
+
+    // Check timestamp - if too far from root, stop
+    const timeElement = await article.locator("time").first();
+    const datetime = (await timeElement.getAttribute("datetime"))?.trim() ?? "";
+    if (datetime) {
+      const articleTime = new Date(datetime).getTime();
+      const timeDiff = Math.abs(articleTime - firstTime);
+      if (timeDiff > TIME_WINDOW_MS) {
+        // Too far from root tweet, stop collecting
+        break;
+      }
     }
 
     // Use first() to avoid strict mode violation
