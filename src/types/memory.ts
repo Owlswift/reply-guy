@@ -8,6 +8,7 @@ export interface ReplyMemory {
     relationship: Relationship;
     aiDraft: string;
     finalReply: string;
+    wasEdited: boolean;
     approved: boolean;
     createdAt: Date;
 }

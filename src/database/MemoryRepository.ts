@@ -18,6 +18,7 @@ export class MemoryRepository {
         relationship: memory.relationship,
         aiDraft: memory.aiDraft,
         finalReply: memory.finalReply,
+        wasEdited: memory.wasEdited,
         approved: memory.approved,
         createdAt: memory.createdAt,
       }
@@ -39,6 +40,7 @@ export class MemoryRepository {
       relationship: m.relationship as any,
       aiDraft: m.aiDraft,
       finalReply: m.finalReply,
+      wasEdited: m.wasEdited,
       approved: m.approved,
       createdAt: m.createdAt
     }));

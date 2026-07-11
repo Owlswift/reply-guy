@@ -80,14 +80,18 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
 
   if (result.status === "posted") {
     // Save complete memory
+    const aiDraft = result.draft || "";
+    const finalReply = result.finalReply || "";
+    
     await memoryRepo.saveMemory({
       id: "",
       tweetId: tweet.id,
       tweetText: details.text || tweet.text,
       author: details.handle || tweet.author,
       relationship: "stranger",
-      aiDraft: result.draft || "",
-      finalReply: result.finalReply || "",
+      aiDraft,
+      finalReply,
+      wasEdited: aiDraft.trim() !== finalReply.trim(),
       approved: true,
       createdAt: new Date()
     });
