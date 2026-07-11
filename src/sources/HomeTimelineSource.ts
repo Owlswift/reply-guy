@@ -6,10 +6,8 @@ export class HomeTimelineSource {
     name = "Home Timeline";
 
     async getTweets(page: Page) {
-
-        await page.goto("https://x.com/home");
-
+        // Don't navigate - just extract tweets from current page
+        // This allows the app to stay on the notifications page
         return extractTweets(page, "timeline");
-
     }
 }
