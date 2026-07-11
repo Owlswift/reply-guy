@@ -20,7 +20,7 @@ export class SourceManager {
 
         for (const source of this.sources) {
 
-            console.log(`Checking ${source.name}...`);
+            console.log(`[SourceManager] Checking ${source.name}...`);
 
             try {
 
@@ -28,7 +28,7 @@ export class SourceManager {
                     await source.getTweets(page);
 
                 console.log(
-                    `${source.name}: ${result.length} tweets`
+                    `[SourceManager] ${source.name}: ${result.length} tweets`
                 );
 
                 tweets.push(...result);
@@ -36,7 +36,7 @@ export class SourceManager {
             } catch (err) {
 
                 console.error(
-                    `${source.name} failed`,
+                    `[SourceManager] ${source.name} failed`,
                     err
                 );
 
