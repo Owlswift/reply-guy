@@ -114,6 +114,30 @@ export async function reviewSession(
         }
 
         if (success) {
+            // Save this reply as a memory so the AI learns from it
+            try {
+                const wasEdited = draft !== terminalReply;
+                const memory: any = {
+                    id: "",
+                    tweetId: details.id,
+                    tweetText: details.text,
+                    authorHandle: details.author,
+                    relationship: details.relationship,
+                    aiDraft: draft,
+                    finalReply: terminalReply,
+                    wasEdited,
+                    approved: true,
+                    createdAt: new Date()
+                };
+                if (wasEdited) {
+                    memory.editedReply = terminalReply;
+                }
+                await memoryRepo.saveMemory(memory);
+                console.log("🧠 Saved reply to memory for learning.\n");
+            } catch (err) {
+                console.error("Failed to save memory:", err);
+            }
+
             return {
                 status: "posted",
                 draft,
