@@ -4,9 +4,10 @@ export interface ReplyMemory {
     id: string;
     tweetId: string;
     tweetText: string;
-    author: string;
+    authorHandle: string;
     relationship: Relationship;
     aiDraft: string;
+    editedReply?: string;
     finalReply: string;
     wasEdited: boolean;
     approved: boolean;

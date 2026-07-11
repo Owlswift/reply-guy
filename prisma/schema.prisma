@@ -14,6 +14,14 @@ enum TweetStatus {
   REPLIED
 }
 
+enum Relationship {
+  STRANGER
+  FOLLOWING
+  FOLLOWER
+  MUTUAL
+  SELF
+}
+
 model Tweet {
   id            String      @id @default(cuid())
   tweetId       String      @unique
@@ -50,19 +58,22 @@ model Draft {
   updatedAt   DateTime @updatedAt
 }
 
-model replyMemory {
+model ReplyMemory {
   id          String   @id @default(cuid())
-  
+
   tweetId     String   @unique
   tweetText   String   @db.Text
-  author      String
-  relationship String
-  
+  authorHandle String
+  relationship Relationship
+
   aiDraft     String   @db.Text
+  editedReply String?  @db.Text
   finalReply  String   @db.Text
-  
+
   wasEdited   Boolean  @default(false)
   approved    Boolean  @default(false)
-  
+
   createdAt   DateTime @default(now())
+
+  @@index([createdAt])
 }

@@ -87,7 +87,7 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
       id: "",
       tweetId: tweet.id,
       tweetText: details.text || tweet.text,
-      author: details.handle || tweet.author,
+      authorHandle: details.handle || tweet.author,
       relationship: "stranger",
       aiDraft,
       finalReply,
