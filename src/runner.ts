@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getPage } from "./browser/browser";
 import { getTimelineTweets } from "./browser/timeline";
 import { openTweet } from "./browser/openTweet";

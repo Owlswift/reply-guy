@@ -8,6 +8,7 @@ import { shouldRefreshSession, markSessionRefreshed } from "../utils/session";
 import { isLoggedIn } from "../browser/isLoggedIn";
 import { enqueue, queueSize, QueueItem } from "../core/queue";
 import { Page } from "playwright";
+import { sessionManager } from "../core/sessionManager";
 
 // Random delay between min and max milliseconds
 function randomDelay(min: number, max: number): number {
@@ -16,6 +17,12 @@ function randomDelay(min: number, max: number): number {
 
 export async function runTimelineWorker(page: Page): Promise<void> {
   while (true) {
+    // Check if review session is active - if so, wait
+    if (sessionManager.isReviewing()) {
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
     try {
       // Check if still logged in
       if (!(await isLoggedIn(page))) {

@@ -9,10 +9,10 @@ export interface QueueItem {
   relationship?: Relationship;
   tweetType?: TweetType;
   priority?: number;
-  draft?: string;
+  draft?: string | undefined;
   attempts?: number;
   createdAt: number;
-  status: "pending" | "drafting" | "ready" | "posted" | "failed";
+  status: "pending" | "drafting" | "ready" | "processing" | "posted" | "failed";
 }
 
 const queue: QueueItem[] = [];

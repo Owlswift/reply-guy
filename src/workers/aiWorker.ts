@@ -4,13 +4,32 @@ import { classifyTweet } from "../ai/classifyTweet";
 import { getRelationship } from "../relationship/getRelationship";
 import { log } from "../utils/logger";
 import { Page } from "playwright";
+import { sessionManager } from "../core/sessionManager";
 
 export async function runAIWorker(page: Page): Promise<void> {
   while (true) {
+    // Check if review session is active - if so, wait
+    if (sessionManager.isReviewing()) {
+      await new Promise(r => setTimeout(r, 500));
+      continue;
+    }
+
     const next = findPending();
 
     if (!next) {
       await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
+    // Skip if already has a draft (prevents reprocessing)
+    if (next.draft) {
+      await new Promise(r => setTimeout(r, 500));
+      continue;
+    }
+
+    // Skip if already being processed by browser worker
+    if (next.status === "processing") {
+      await new Promise(r => setTimeout(r, 500));
       continue;
     }
 

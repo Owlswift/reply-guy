@@ -1,4 +1,5 @@
 import { Page } from "playwright";
+import { sessionManager } from "../core/sessionManager";
 
 export interface TimelineTweet {
   id: string;
@@ -18,6 +19,13 @@ export async function getTimelineTweets(
   page: Page,
   limit = 30
 ): Promise<TimelineTweet[]> {
+  // If in review mode, we should be on a tweet page - don't navigate away!
+  if (sessionManager.isReviewing()) {
+    // In review mode, we're intentionally on a tweet page
+    // Just wait and return empty to avoid interfering with the review
+    return [];
+  }
+
   // Check if already on x.com/home or timeline
   const currentUrl = page.url();
   if (currentUrl.includes("/status/")) {

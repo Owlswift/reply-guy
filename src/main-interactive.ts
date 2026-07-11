@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getPage } from "./browser/browser";
 import { getTimelineTweets } from "./browser/timeline";
 import { shouldReply } from "./filter/filterTweet";
@@ -6,9 +7,10 @@ import { log } from "./utils/logger";
 import { updateTimeline, timelineLooksStuck, resetTimelineState } from "./timeline/state";
 import { shouldRefreshSession, markSessionRefreshed } from "./utils/session";
 import { isLoggedIn } from "./browser/isLoggedIn";
-import { enqueue, queueSize, QueueItem } from "./core/queue";
+import { enqueue, queueSize, getQueue, QueueItem } from "./core/queue";
 import { runAIWorker } from "./workers/aiWorker";
 import { runBrowserWorker } from "./workers/browserWorker";
+import { sessionManager } from "./core/sessionManager";
 
 const DAILY_LIMIT = 40;
 
@@ -26,6 +28,12 @@ async function main() {
   runBrowserWorker(page);
 
   while (replyCount < DAILY_LIMIT) {
+    // Check if review session is active - if so, wait
+    if (sessionManager.isReviewing()) {
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
     try {
       // Check if still logged in
       if (!(await isLoggedIn(page))) {
@@ -59,18 +67,22 @@ async function main() {
         continue;
       }
 
-      // Enqueue tweets
+      // Enqueue tweets (only if not already in queue)
       for (const tweet of tweets) {
         if (shouldReply(tweet)) {
-          const item: QueueItem = {
-            id: tweet.id,
-            url: tweet.url,
-            author: tweet.author,
-            text: tweet.text,
-            createdAt: Date.now(),
-            status: "pending"
-          };
-          enqueue(item);
+          // Check if already in queue
+          const existing = getQueue().find((q: QueueItem) => q.id === tweet.id);
+          if (!existing) {
+            const item: QueueItem = {
+              id: tweet.id,
+              url: tweet.url,
+              author: tweet.author,
+              text: tweet.text,
+              createdAt: Date.now(),
+              status: "pending"
+            };
+            enqueue(item);
+          }
         }
       }
 

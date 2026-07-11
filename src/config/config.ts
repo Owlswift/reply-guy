@@ -9,7 +9,7 @@ export const config = {
   },
   model: "qwen3:8b",
   ollamaUrl: "http://localhost:11434/api/generate",
-  dryRun: true,
+  dryRun: false,
   maxRetries: 2,
   healthCheckInterval: 30000,
   backupInterval: 24 * 60 * 60 * 1000

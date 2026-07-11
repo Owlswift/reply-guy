@@ -1,14 +1,15 @@
+import "dotenv/config";
 import { getPage } from "./browser/browser";
 import { getTimelineTweets } from "./browser/timeline";
 import { openTweet } from "./browser/openTweet";
 import { extractCurrentTweet } from "./browser/extractTweet";
-import { backToTimeline } from "./reply/backToTimeline";
 import { isLoggedIn } from "./browser/isLoggedIn";
 import { log } from "./utils/logger";
 import { reviewSession } from "./cli/reviewSession";
 import { MemoryRepository } from "./database/MemoryRepository";
 import { shouldReply } from "./filter/filterTweet";
 import { scrollTimeline } from "./browser/scroll";
+import { sessionManager } from "./core/sessionManager";
 
 const memoryRepo = new MemoryRepository();
 
@@ -96,9 +97,6 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
       createdAt: new Date()
     });
   }
-
-  // Go back to timeline
-  await backToTimeline(page);
 }
 
 // Main loop
@@ -118,6 +116,12 @@ async function main() {
   });
 
   while (true) {
+    // Check if review session is active - if so, wait
+    if (sessionManager.isBusy()) {
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
     try {
       // Check if still logged in
       if (!(await isLoggedIn(page))) {

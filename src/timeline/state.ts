@@ -18,6 +18,10 @@ export function updateTimeline(tweetIds: string[]): void {
   }
 }
 
+export function hasSeenTweet(id: string): boolean {
+  return seenTweetIds.has(id);
+}
+
 export function timelineLooksStuck(): boolean {
   return stagnantRounds >= 3;
 }

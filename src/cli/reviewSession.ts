@@ -1,17 +1,18 @@
 import { Page } from "playwright";
 import { generateReply } from "../ai/ollama";
 import { buildPrompt } from "../ai/buildPrompt";
-import { prepareReply, getBrowserReply, clickReply } from "../reply/reply";
+import { prepareReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
 import { chooseReplySource } from "./conflictPrompt";
 import { confirmPost } from "./confirm";
 import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
+import { sessionManager } from "../core/sessionManager";
 
 const memoryRepo = new MemoryRepository();
 
 export interface ReviewSessionResult {
-    status: "posted" | "skipped" | "cancelled";
+    status: "posted" | "skipped" | "cancelled" | "regen";
     draft?: string;
     finalReply?: string;
 }
@@ -28,96 +29,95 @@ export async function reviewSession(
     page: Page,
     details: ReviewSessionDetails
 ): Promise<ReviewSessionResult> {
-    // Load recent memories for learning
-    const memories = await memoryRepo.getRecentMemories(20);
+    // Enter REVIEWING state - this blocks all other workers
+    sessionManager.startReview(details.id);
     
-    const prompt = buildPrompt({
-        tweet: details.text,
-        relationship: details.relationship,
-        memories
-    });
+    try {
+        // Load recent memories for learning
+        const memories = await memoryRepo.getRecentMemories(20);
+        
+        const prompt = buildPrompt({
+            tweet: details.text,
+            relationship: details.relationship,
+            memories
+        });
 
-    // Use existing draft if available, otherwise generate
-    let draft = details.existingDraft ?? await generateReply(prompt);
-    let terminalReply = draft;
+        // Use existing draft if available, otherwise generate
+        let draft = details.existingDraft ?? await generateReply(prompt);
+        let terminalReply = draft;
 
-    // Fill browser with initial draft
-    await prepareReply(page, terminalReply);
+        // First, review in terminal WITHOUT opening reply box
+        while (true) {
+            const review = await reviewReply(
+                details.author,
+                details.text,
+                terminalReply
+            );
 
-    while (true) {
-        const review = await reviewReply(
-            details.author,
-            details.text,
-            terminalReply
-        );
+            switch (review.action) {
+                case "edit":
+                    terminalReply = review.reply;
+                    continue;
 
-        switch (review.action) {
-            case "edit":
-                terminalReply = review.reply;
-                await prepareReply(page, terminalReply);
-                continue;
+                case "regenerate":
+                    draft = await generateReply(prompt);
+                    terminalReply = draft;
+                    // Return regen status to signal browser worker to put back in queue
+                    return { status: "regen", draft };
 
-            case "regenerate":
-                draft = await generateReply(prompt);
-                terminalReply = draft;
-                await prepareReply(page, terminalReply);
-                continue;
+                case "skip":
+                    return { status: "skipped" };
 
-            case "skip":
-                return { status: "skipped" };
+                case "quit":
+                    process.exit(0);
 
-            case "quit":
-                process.exit(0);
+                case "approve":
+                    break;
+            }
 
-            case "approve":
-                break;
+            break;
         }
 
-        break;
-    }
-
-    // Check for empty reply
-    if (!terminalReply.trim()) {
-        console.log("Reply cannot be empty.");
-        return { status: "cancelled" };
-    }
-
-    // Compare browser vs terminal
-    const browserReply = await getBrowserReply(page);
-    let finalReply = terminalReply;
-
-    if (browserReply.trim() !== terminalReply.trim()) {
-        // Different - ask which to use
-        const source = await chooseReplySource(terminalReply, browserReply);
-
-        if (source === "cancel") {
+        // Check for empty reply
+        if (!terminalReply.trim()) {
+            console.log("Reply cannot be empty.");
             return { status: "cancelled" };
         }
 
-        if (source === "browser") {
-            finalReply = browserReply;
-        } else {
-            // Use terminal - overwrite browser
-            await prepareReply(page, terminalReply);
+        // Final confirmation
+        const confirmed = await confirmPost(terminalReply);
+        if (!confirmed) {
+            return { status: "cancelled" };
         }
-    }
 
-    // Final confirmation
-    const confirmed = await confirmPost(finalReply);
-    if (!confirmed) {
+        // Switch to POSTING state for the actual post operation
+        sessionManager.startPosting();
+
+        // NOW open the reply box and post (prepareReply already calls openReplyBox)
+        await prepareReply(page, terminalReply);
+
+        // Submit
+        const success = await clickReply(page, details.author);
+
+        // Navigate back to timeline (only if not in dry run mode)
+        if (!process.env.DRY_RUN) {
+            await page.waitForTimeout(2000);
+            await page.goBack();
+            await page.waitForLoadState("networkidle", { timeout: 15000 });
+            await page.waitForTimeout(1000);
+        }
+
+        if (success) {
+            return {
+                status: "posted",
+                draft,
+                finalReply: terminalReply
+            };
+        }
+
         return { status: "cancelled" };
+    } finally {
+        // Always exit REVIEWING state, even on error
+        sessionManager.endReview();
     }
-
-    // Submit
-    const success = await clickReply(page, details.author);
-
-    if (success) {
-        return {
-            status: "posted",
-            draft,
-            finalReply
-        };
-    }
-
-    return { status: "cancelled" };
 }

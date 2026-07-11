@@ -1,4 +1,5 @@
 import { Page } from "playwright";
+import { sessionManager } from "../core/sessionManager";
 
 // Random delay between min and max milliseconds
 function randomDelay(min: number, max: number): number {
@@ -6,6 +7,11 @@ function randomDelay(min: number, max: number): number {
 }
 
 export async function scrollTimeline(page: Page): Promise<void> {
+  // Don't scroll if we're in review mode - the review session owns the browser
+  if (sessionManager.isReviewing()) {
+    return;
+  }
+
   // Human-like scrolling: multiple small scrolls
   const scrollCount = Math.floor(Math.random() * 3) + 1;
   

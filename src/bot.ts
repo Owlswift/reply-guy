@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getPage } from "./browser/browser";
 import { getTimelineTweets } from "./browser/timeline";
 import { Page } from "playwright";
@@ -14,7 +15,7 @@ import { shouldRefreshSession, markSessionRefreshed } from "./utils/session";
 import { isLoggedIn } from "./browser/isLoggedIn";
 import { getRelationship } from "./relationship/getRelationship";
 
-const DRY_RUN = true;
+const DRY_RUN = process.env.DRY_RUN === "true";
 const DAILY_LIMIT = 40;
 
 // Random delay between min and max milliseconds

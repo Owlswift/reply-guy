@@ -1,4 +1,5 @@
 import { Page } from "playwright";
+import { sessionManager } from "../core/sessionManager";
 
 // Random delay between min and max milliseconds
 function randomDelay(min: number, max: number): number {
@@ -6,6 +7,11 @@ function randomDelay(min: number, max: number): number {
 }
 
 export async function backToTimeline(page: Page): Promise<void> {
+  // Don't navigate if we're busy (reviewing or posting) - the review session owns the browser
+  if (sessionManager.isBusy()) {
+    return;
+  }
+
   await page.goBack();
 
   await page.waitForLoadState("networkidle", { timeout: 15000 });

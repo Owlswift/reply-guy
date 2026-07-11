@@ -1,14 +1,20 @@
 import { peek, dequeue, updateItem } from "../core/queue";
 import { openTweet } from "../browser/openTweet";
-import { backToTimeline } from "../reply/backToTimeline";
 import { markReplied } from "../storage/repliedTweets";
 import { log } from "../utils/logger";
 import { Page } from "playwright";
 import { reviewSession, ReviewSessionDetails } from "../cli/reviewSession";
 import { stats } from "../stats/runtime";
+import { sessionManager } from "../core/sessionManager";
 
 export async function runBrowserWorker(page: Page): Promise<void> {
   while (true) {
+    // Check if review session is active - if so, wait
+    if (sessionManager.isReviewing()) {
+      await new Promise(r => setTimeout(r, 500));
+      continue;
+    }
+
     const item = peek();
 
     if (!item) {
@@ -16,18 +22,22 @@ export async function runBrowserWorker(page: Page): Promise<void> {
       continue;
     }
 
+    // Only process items that are "ready" and not already being processed
     if (item.status !== "ready") {
       await new Promise(r => setTimeout(r, 500));
       continue;
     }
 
+    // Lock the item to prevent race conditions
+    updateItem(item.id, { status: "processing" });
+
     try {
-      // Open the tweet
+      // Open the tweet first (needed for reply box)
       log(`Browser opening tweet ${item.id}`);
       stats.tweets++;
       await openTweet(page, item.url);
 
-      // Run the review session
+      // Run the review session (which will open the reply box when approved)
       const details: ReviewSessionDetails = {
         id: item.id,
         author: item.author,
@@ -53,19 +63,27 @@ export async function runBrowserWorker(page: Page): Promise<void> {
         dequeue();
         stats.skipped++;
         console.log("\nSkipped.\n");
+      } else if (result.status === "regen") {
+        // Regenerate - put back to ready for AI to regenerate
+        updateItem(item.id, { 
+          status: "ready",
+          draft: result.draft
+        });
+      } else {
+        // For cancelled, put back to ready
+        updateItem(item.id, { status: "ready" });
       }
-
-      // Go back to timeline with auto-scroll delay
-      log("Returning to timeline...");
-      await page.waitForTimeout(2000);
-      await backToTimeline(page);
-      await page.waitForTimeout(1000);
     } catch (err) {
       console.error(`Browser error for ${item.id}:`, err);
       updateItem(item.id, {
         status: "failed",
         attempts: (item.attempts || 0) + 1
       });
+      // Remove from queue after max attempts to prevent infinite loop
+      if ((item.attempts || 0) + 1 >= 3) {
+        dequeue();
+        console.log(`\n❌ Max attempts reached for ${item.id}, removing from queue.\n`);
+      }
     }
   }
 }
