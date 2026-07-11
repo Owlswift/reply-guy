@@ -53,7 +53,7 @@ model Draft {
 model replyMemory {
   id          String   @id @default(cuid())
   
-  tweetId     String
+  tweetId     String   @unique
   tweetText   String   @db.Text
   author      String
   relationship String

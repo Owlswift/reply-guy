@@ -13,8 +13,8 @@ export function buildPersonalityPrompt(
 ): string {
   // Prioritize edited replies (strongest learning signal)
   const sortedMemories = [...memories].sort((a, b) => {
-    const aEdited = a.aiDraft !== a.finalReply;
-    const bEdited = b.aiDraft !== b.finalReply;
+    const aEdited = a.wasEdited;
+    const bEdited = b.wasEdited;
     if (aEdited === bEdited) return 0;
     return aEdited ? -1 : 1;
   });
@@ -27,7 +27,10 @@ Example ${index + 1}
 Original Tweet:
 ${m.tweetText}
 
-My Reply:
+AI Draft:
+${m.aiDraft}
+
+Final Reply:
 ${m.finalReply}
 `)
     .join("\n");
@@ -68,6 +71,10 @@ Current Tweet
 ${tweet}
 
 Write ONE reply.
+
+Your goal is to produce a reply that already looks like my Final Reply.
+
+Avoid making the same mistakes shown in the AI Drafts.
 
 Rules:
 

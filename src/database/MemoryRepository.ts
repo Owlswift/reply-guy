@@ -3,10 +3,10 @@ import { ReplyMemory } from "../types/memory";
 
 export class MemoryRepository {
   async hasMemory(tweetId: string): Promise<boolean> {
-    const memory = await prisma.replyMemory.findFirst({
+    const memory = await prisma.replyMemory.findUnique({
       where: { tweetId }
     });
-    return !!memory;
+    return memory !== null;
   }
 
   async saveMemory(memory: ReplyMemory) {
@@ -26,23 +26,10 @@ export class MemoryRepository {
   }
 
   async getRecentMemories(limit: number = 20): Promise<ReplyMemory[]> {
-    const memories = await prisma.replyMemory.findMany({
+    return prisma.replyMemory.findMany({
       where: { approved: true },
       orderBy: { createdAt: 'desc' },
       take: limit
-    });
-
-    return memories.map((m: any) => ({
-      id: m.id,
-      tweetId: m.tweetId,
-      tweetText: m.tweetText,
-      author: m.author,
-      relationship: m.relationship as any,
-      aiDraft: m.aiDraft,
-      finalReply: m.finalReply,
-      wasEdited: m.wasEdited,
-      approved: m.approved,
-      createdAt: m.createdAt
-    }));
+    }) as Promise<ReplyMemory[]>;
   }
 }
