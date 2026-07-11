@@ -4,20 +4,7 @@ import { getExamples } from "./examples";
 import { Relationship } from "../relationship/types";
 import { TweetType } from "../ai/classifyTweet";
 import { ReplyMemory } from "../types/memory";
-
-function formatMemories(memories: ReplyMemory[]): string {
-    if (!memories || memories.length === 0) return "";
-    
-    return memories.map((m, i) => `
-Example ${i + 1}
-----------------------------------
-Original Tweet:
-${m.tweetText}
-
-John replied:
-${m.finalReply}
-`).join("\n");
-}
+import { formatMemories } from "../ai/formatMemories";
 
 export function buildPersonalityPrompt(
   tweet: string,
