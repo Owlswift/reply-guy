@@ -15,10 +15,10 @@ export interface TimelineTweet {
     reposts: number;
 }
 
-// Navigate to home page (for reload functionality)
+// Navigate to notifications page (for reload functionality)
 export async function navigateToHome(page: Page): Promise<void> {
-    console.log("Navigating to home page...");
-    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+    console.log("Navigating to notifications...");
+    await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded" });
     await page.waitForLoadState("networkidle", { timeout: 15000 });
 }
 
@@ -33,15 +33,15 @@ export async function getTimelineTweets(
     return [];
   }
 
-  // Check if already on x.com/home or timeline
+  // Check if already on x.com/notifications or timeline
   const currentUrl = page.url();
   if (currentUrl.includes("/status/")) {
-    // If on a tweet page, go back to home
-    console.log("On tweet page, going back to home...");
-    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+    // If on a tweet page, go back to notifications
+    console.log("On tweet page, going back to notifications...");
+    await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded" });
   } else if (!currentUrl.includes("x.com/")) {
-    console.log("Navigating to x.com/home...");
-    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+    console.log("Navigating to x.com/notifications...");
+    await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded" });
   }
 
   // Wait for timeline to load

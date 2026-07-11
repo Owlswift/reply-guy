@@ -12,7 +12,7 @@ export async function backToTimeline(page: Page): Promise<void> {
     return;
   }
 
-  await page.goBack();
+  await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded", timeout: 10000 });
 
   await page.waitForLoadState("networkidle", { timeout: 15000 });
 

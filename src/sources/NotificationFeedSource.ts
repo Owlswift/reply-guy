@@ -33,14 +33,13 @@ export class NotificationFeedSource {
     }
 
     async returnToPostsFeed(page: Page): Promise<void> {
-        // Use browser history to go back to posts feed
-        // This is more efficient than navigating from home
+        // Navigate directly to notifications feed
         try {
-            await page.goBack({ timeout: 3000 });
+            await page.goto("https://x.com/notifications", { waitUntil: "domcontentloaded", timeout: 10000 });
             // Wait for articles to be ready
             await page.waitForSelector("article", { timeout: 5000 });
         } catch {
-            // If goBack fails, we may need to reopen
+            // If navigation fails, we may need to reopen
             this.isActive = false;
         }
     }
