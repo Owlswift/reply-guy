@@ -69,21 +69,25 @@ export async function getTimelineTweets(
       const replies = parseInt(replyButton?.textContent?.trim() || "0") || 0;
       const reposts = parseInt(repostButton?.textContent?.trim() || "0") || 0;
 
-      return {
-        id: match?.[1] ?? "",
-        author,
-        username: handle,
-        text,
-        url: href.startsWith("http")
-          ? href
-          : `https://x.com${href.split("?")[0]}`,
-        verified: false,
-        following: false,
-        followsYou: false,
-        likes,
-        replies,
-        reposts
-      };
+       // Check for verified badge
+       const verifiedBadge = article.querySelector('[data-testid="icon-verified"]');
+       const verified = !!verifiedBadge;
+
+       return {
+         id: match?.[1] ?? "",
+         author,
+         username: handle,
+         text,
+         url: href.startsWith("http")
+           ? href
+           : `https://x.com${href.split("?")[0]}`,
+         verified,
+         following: false,
+         followsYou: false,
+         likes,
+         replies,
+         reposts
+       };
     });
   }, limit);
 
