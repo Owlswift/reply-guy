@@ -167,10 +167,15 @@ ${imageDescriptions.map((d, i) => `Image ${i + 1}: ${d}`).join("\n")}
   const styleGuidance = style.map(s => `- ${s}`).join("\n");
   const exampleOpenings = openings.slice(0, 5).map(o => `- "${o}"`).join("\n");
 
+  // Build analysis context if available
+  const analysisContext = "";
+
   return `
 You are writing replies exactly as I would.
 
 ${imageContext}
+
+${analysisContext}
 
 First, silently determine:
 
@@ -184,6 +189,7 @@ Then write a reply that does ONE of these:
 - Make a witty observation.
 - Expand on the idea.
 - Make people smile.
+- React as if a friend told you this.
 
 A bad reply:
 
