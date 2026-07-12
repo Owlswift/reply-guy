@@ -63,10 +63,12 @@ async function main() {
 
     try {
       // Check if still logged in
+      console.log("  → Checking login state...");
       if (!(await isLoggedIn(page))) {
         log("Session expired. Stopping bot.");
         break;
       }
+      console.log("  ✓ Logged in");
 
       // Check if we should refresh the session
       if (shouldRefreshSession()) {
@@ -76,7 +78,9 @@ async function main() {
       }
 
       // Get tweets from all sources (NotificationFeedSource navigates here)
+      console.log("  → Fetching tweets...");
       const rawTweets = await sourceManager.getTweets(page, navigator);
+      console.log(`  ✓ Fetched ${rawTweets.length} raw tweets`);
 
       // Deduplicate tweets
       const tweets = deduplicateTweets(rawTweets);
@@ -105,6 +109,7 @@ async function main() {
         continue;
       }
 
+      console.log("  → Enqueuing...");
       // Enqueue tweets (only if not already in queue or already replied)
       for (const tweet of tweets) {
         // Skip if already replied
@@ -137,10 +142,14 @@ async function main() {
       const remaining = progress.total - progress.replied;
       console.log(`📊 Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)`);
 
+      console.log(`  ✓ Queue size: ${queueSize()}`);
+
       // Keep queue topped up
       if (queueSize() < 10) {
         log("Queue low, scrolling...");
+        console.log("  → Scrolling timeline...");
         await scrollTimeline(page);
+        console.log("  ✓ Scrolled");
       }
 
       // Random wait before next iteration (driven by the session behavior profile)
