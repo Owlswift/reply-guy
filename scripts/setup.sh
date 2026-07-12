@@ -32,8 +32,8 @@ else
 fi
 echo ""
 
-echo "3. Make sure you have the qwen3:8b model:"
-echo "   ollama run qwen3:8b"
+echo "3. Make sure you have the gpt-oss:20b model:"
+echo "   ollama run gpt-oss:20b"
 echo ""
 
 echo "=== Setup complete ==="

@@ -7,7 +7,7 @@ export const config = {
     start: "07:30",
     end: "23:00"
   },
-  model: "qwen3:8b",
+  model: "gpt-oss:20b",
   ollamaUrl: "http://localhost:11434/api/generate",
   dryRun: false,
   maxRetries: 2,

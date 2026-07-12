@@ -1,4 +1,5 @@
 import { Page } from "playwright";
+import { openDelay } from "../behavior/profiles";
 
 export async function openTweet(page: Page, url: string) {
   await page.goto(url, {
@@ -7,7 +8,8 @@ export async function openTweet(page: Page, url: string) {
 
   await page.waitForSelector("article", { timeout: 15000 });
 
-  await page.waitForTimeout(1500);
+  // Human-like: variable time "deciding" before opening the tweet
+  await page.waitForTimeout(openDelay());
 
   return {
     url: page.url(),

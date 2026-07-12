@@ -49,7 +49,7 @@ npm run setup
 
 This will:
 - Start the Ollama server in the background
-- Remind you to ensure the qwen3:8b model is available
+- Remind you to ensure the gpt-oss:20b model is available
 - Display instructions for starting Chrome with remote debugging
 
 **Note:** Chrome must be started manually in a separate terminal before running the bot:

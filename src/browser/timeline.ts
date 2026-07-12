@@ -1,5 +1,6 @@
 import { Page } from "playwright";
 import { sessionManager } from "../core/sessionManager";
+import { log } from "../utils/logger";
 
 export interface TimelineTweet {
     id: string;
@@ -33,15 +34,14 @@ export async function getTimelineTweets(
     return [];
   }
 
-  // Check if already on x.com/i/timeline
+  // Extraction is only meaningful on the timeline feed. If we are anywhere else
+  // (e.g. an opened tweet conversation page), this is a normal control-flow
+  // condition for an autonomous bot — not an error. Skip (return no tweets)
+  // instead of throwing or navigating, so the caller can just continue.
   const currentUrl = page.url();
-  if (currentUrl.includes("/status/")) {
-    // If on a tweet page, go back to i/timeline
-    console.log("On tweet page, going back to i/timeline...");
-    await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded" });
-  } else if (!currentUrl.includes("x.com/")) {
-    console.log("Navigating to x.com/i/timeline...");
-    await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded" });
+  if (!currentUrl.includes("/i/timeline")) {
+    log("Not on timeline. Skipping extraction.");
+    return [];
   }
 
   // Wait for timeline to load
@@ -58,7 +58,16 @@ export async function getTimelineTweets(
   await page.waitForTimeout(2000);
 
   const tweets = await page.locator("article").evaluateAll((articles, limit) => {
-    return articles.slice(0, limit).map((article) => {
+    // Only keep top-level articles. On a conversation page (/status/), the
+    // replies *within* a tweet are themselves <article> elements nested inside
+    // the main tweet's article. We exclude any article nested inside another
+    // article so we never pick up replies within posts. (Extraction should only
+    // ever run on the feed, but this protects against any regression.)
+    const topLevelArticles = articles.filter(
+      (article) => article.closest("article") === article
+    );
+
+    return topLevelArticles.slice(0, limit).map((article) => {
       const author =
         article.querySelector('[data-testid="User-Name"]')?.textContent?.trim() ?? "";
 

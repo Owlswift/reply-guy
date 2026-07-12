@@ -1,9 +1,9 @@
 import { Page } from "playwright";
 import { sessionManager } from "../core/sessionManager";
+import { randomDelayMs } from "../behavior/delays";
 
-// Random delay between min and max milliseconds
 function randomDelay(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  return randomDelayMs(min, max);
 }
 
 export async function scrollTimeline(page: Page): Promise<void> {
@@ -12,12 +12,26 @@ export async function scrollTimeline(page: Page): Promise<void> {
     return;
   }
 
-  // Human-like scrolling: multiple small scrolls
-  const scrollCount = Math.floor(Math.random() * 3) + 1;
-  
-  for (let i = 0; i < scrollCount; i++) {
-    await page.mouse.wheel(0, 500 + Math.random() * 400);
-    
-    await page.waitForTimeout(randomDelay(600, 1800));
+  // Vary the scrolling pattern so it doesn't look robotic. Humans don't scroll
+  // the same way every time: sometimes one big scroll, sometimes a couple of
+  // small ones, and occasionally a slight scroll-up (re-reading) before continuing.
+  const roll = Math.random();
+
+  if (roll < 0.4) {
+    // One large scroll
+    await page.mouse.wheel(0, 1200 + Math.random() * 800);
+    await page.waitForTimeout(randomDelay(800, 2000));
+  } else if (roll < 0.8) {
+    // Two short scrolls
+    for (let i = 0; i < 2; i++) {
+      await page.mouse.wheel(0, 400 + Math.random() * 300);
+      await page.waitForTimeout(randomDelay(500, 1200));
+    }
+  } else {
+    // Occasionally scroll slightly upward (re-reading) before continuing down
+    await page.mouse.wheel(0, -(200 + Math.random() * 200));
+    await page.waitForTimeout(randomDelay(600, 1500));
+    await page.mouse.wheel(0, 600 + Math.random() * 400);
+    await page.waitForTimeout(randomDelay(600, 1500));
   }
 }

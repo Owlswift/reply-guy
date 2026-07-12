@@ -7,8 +7,10 @@ function randomDelay(min: number, max: number): number {
 }
 
 export async function backToTimeline(page: Page): Promise<void> {
-  // Don't navigate if we're busy (reviewing or posting) - the review session owns the browser
-  if (sessionManager.isBusy()) {
+  // Don't navigate while a review session owns the browser. During the
+  // PROCESSING state (a tweet was opened but the review hasn't started yet) the
+  // worker is allowed to navigate back — e.g. when skipping an unreplyable tweet.
+  if (sessionManager.isReviewing()) {
     return;
   }
 

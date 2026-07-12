@@ -1,6 +1,7 @@
 import { Page } from "playwright";
 import { generateReply } from "../ai/ollama";
 import { buildPrompt } from "../ai/buildPrompt";
+import { classifyTweet, TweetType } from "../ai/classifyTweet";
 import { prepareReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
 import { chooseReplySource } from "./conflictPrompt";
@@ -8,8 +9,7 @@ import { confirmPost } from "./confirm";
 import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
 import { sessionManager } from "../core/sessionManager";
-import { navigateToHome } from "../browser/timeline";
-import { navigateToHomeAfterPost } from "../reply/submitReply";
+import { BrowserNavigator } from "../browser/BrowserNavigator";
 
 const memoryRepo = new MemoryRepository();
 
@@ -29,6 +29,7 @@ export interface ReviewSessionDetails {
 
 export async function reviewSession(
     page: Page,
+    navigator: BrowserNavigator,
     details: ReviewSessionDetails
 ): Promise<ReviewSessionResult> {
     // Enter REVIEWING state - this blocks all other workers
@@ -37,7 +38,11 @@ export async function reviewSession(
     try {
         // Load recent memories for learning
         const memories = await memoryRepo.getRecentMemories(20);
+        console.log(`🧠 Loaded ${memories.length} past replies for learning (${memories.filter(m => m.wasEdited).length} were edited by you)\n`);
         
+        // Classify the tweet to decide how to handle it
+        const tweetType: TweetType = classifyTweet(details.text);
+
         const prompt = buildPrompt({
             tweet: details.text,
             relationship: details.relationship,
@@ -47,6 +52,50 @@ export async function reviewSession(
         // Use existing draft if available, otherwise generate
         let draft = details.existingDraft ?? await generateReply(prompt);
         let terminalReply = draft;
+
+        // Auto-approve well-wish tweets (happy sunday, happy new week, etc.) — no intervention needed
+        if (tweetType === "well_wish") {
+            console.log(`🤖 Auto-replying to well-wish tweet from @${details.author}\n`);
+            
+            // Switch to POSTING state for the actual post operation
+            sessionManager.startPosting();
+
+            // Open reply box and post
+            await prepareReply(page, terminalReply);
+            const success = await clickReply(page, details.author);
+
+            if (!process.env.DRY_RUN) {
+                await page.waitForTimeout(2000);
+                await navigator.returnToTimeline();
+            }
+
+            if (success) {
+                try {
+                    const memory: any = {
+                        id: "",
+                        tweetId: details.id,
+                        tweetText: details.text,
+                        authorHandle: details.author,
+                        relationship: details.relationship,
+                        aiDraft: draft,
+                        finalReply: terminalReply,
+                        wasEdited: false,
+                        approved: true,
+                        createdAt: new Date()
+                    };
+                    await memoryRepo.saveMemory(memory);
+                    console.log("🧠 Saved reply to memory for learning.\n");
+                } catch (err) {
+                    console.error("Failed to save memory:", err);
+                }
+            }
+
+            return {
+                status: "posted",
+                draft,
+                finalReply: terminalReply
+            };
+        }
 
         // First, review in terminal WITHOUT opening reply box
         while (true) {
@@ -74,8 +123,8 @@ export async function reviewSession(
                 process.exit(0);
 
             case "reload":
-                // Navigate to home page to reset state
-                await navigateToHome(page);
+                // Navigate to i/timeline to reset state
+                await navigator.navigateToTimeline();
                 return { status: "cancelled" };
 
             case "approve":
@@ -105,12 +154,10 @@ export async function reviewSession(
         // Submit
         const success = await clickReply(page, details.author);
 
-        // Navigate back to timeline (only if not in dry run mode)
+        // Navigate back to i/timeline (only if not in dry run mode)
         if (!process.env.DRY_RUN) {
             await page.waitForTimeout(2000);
-            // Navigate to home to ensure we're back on timeline
-            await navigateToHomeAfterPost(page);
-            await page.waitForTimeout(1000);
+            await navigator.returnToTimeline();
         }
 
         if (success) {

@@ -1,9 +1,10 @@
 import { Page } from "playwright";
 import { TimelineTweet } from "../types/tweet";
+import { BrowserNavigator } from "../browser/BrowserNavigator";
 
 interface Source {
     name: string;
-    getTweets(page: Page): Promise<TimelineTweet[]>;
+    getTweets(page: Page, navigator: BrowserNavigator): Promise<TimelineTweet[]>;
 }
 
 export class SourceManager {
@@ -13,7 +14,8 @@ export class SourceManager {
     ) {}
 
     async getTweets(
-        page: Page
+        page: Page,
+        navigator: BrowserNavigator
     ): Promise<TimelineTweet[]> {
 
         const tweets: TimelineTweet[] = [];
@@ -23,7 +25,7 @@ export class SourceManager {
             try {
 
                 const result =
-                    await source.getTweets(page);
+                    await source.getTweets(page, navigator);
 
                 tweets.push(...result);
 

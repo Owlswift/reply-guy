@@ -1,7 +1,7 @@
 import { Page } from "playwright";
-import { openNotificationFeed } from "../browser/openNotificationFeed";
 import { extractTweets } from "../browser/extractTweets";
 import { markNotificationSeen, isNotificationSeen } from "../storage/seenNotifications";
+import { BrowserNavigator } from "../browser/BrowserNavigator";
 
 export class NotificationFeedSource {
 
@@ -9,9 +9,9 @@ export class NotificationFeedSource {
 
     private isActive: boolean = false;
 
-    async getTweets(page: Page) {
+    async getTweets(page: Page, navigator: BrowserNavigator) {
         if (!this.isActive) {
-            const opened = await openNotificationFeed(page);
+            const opened = await navigator.openNotificationFeed();
             if (!opened) {
                 return [];
             }
@@ -32,12 +32,11 @@ export class NotificationFeedSource {
         return isNotificationSeen(tweetId);
     }
 
-    async returnToPostsFeed(page: Page): Promise<void> {
+    async returnToPostsFeed(navigator: BrowserNavigator): Promise<void> {
         // Navigate directly to the filtered posts timeline
         try {
-            await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded", timeout: 10000 });
-            // Wait for articles to be ready
-            await page.waitForSelector("article", { timeout: 5000 });
+            await navigator.navigateToTimeline();
+            // Note: Cannot wait for selector here as we don't have page access
         } catch {
             // If navigation fails, we may need to reopen
             this.isActive = false;

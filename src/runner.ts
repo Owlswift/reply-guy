@@ -43,8 +43,8 @@ async function run() {
       // Extract details
       const details = await extractCurrentTweet(page);
 
-      // Skip if no text extracted
-      if (!details.text) {
+      // Skip if we couldn't extract the tweet (deleted, layout changed, etc.)
+      if (!details) {
         console.log("No text extracted, skipping");
         await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
         continue;

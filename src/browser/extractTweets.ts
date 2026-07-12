@@ -1,5 +1,6 @@
 import { Page } from "playwright";
 import { TimelineTweet } from "../types/tweet";
+import { log } from "../utils/logger";
 
 export type TweetSourceType = "notifications" | "timeline" | "watchlist";
 
@@ -8,13 +9,20 @@ export async function extractTweets(
     source: TweetSourceType = "timeline"
 ): Promise<TimelineTweet[]> {
 
-    // For notifications source, only extract from the i/timeline page
-    if (source === "notifications") {
-        const currentUrl = page.url();
-        if (!currentUrl.includes("/i/timeline")) {
-            console.log(`Not on i/timeline page (${currentUrl}), navigating...`);
-            await page.goto("https://x.com/i/timeline", { waitUntil: "domcontentloaded" });
-        }
+    // Extraction is only meaningful on a feed page. If we are anywhere else
+    // (e.g. an opened tweet conversation page, or a logged-out/error page), this
+    // is a normal control-flow condition for an autonomous bot — not an error.
+    // Skip silently (return no tweets) instead of throwing, so the caller can
+    // just continue to the next cycle.
+    const url = page.url();
+    const onTimeline =
+        url.includes("/i/timeline") ||
+        url.includes("/home") ||
+        url.includes("/notifications");
+
+    if (!onTimeline) {
+        log("Not on timeline. Skipping extraction.");
+        return [];
     }
 
     // Wait for timeline to load
@@ -31,7 +39,16 @@ export async function extractTweets(
     await page.waitForTimeout(2000);
 
     const tweets = await page.locator("article").evaluateAll((articles, source) => {
-        return articles.map((article) => {
+        // Defense in depth: only keep top-level articles. On a conversation page the
+        // replies *within* a tweet are themselves <article> elements nested inside the
+        // main tweet's article. We exclude any article nested inside another so we
+        // never pick up replies within posts. (This should never trigger because we
+        // only extract from the feed, but it protects against any future regression.)
+        const topLevelArticles = articles.filter(
+            (article) => article.closest("article") === article
+        );
+
+        return topLevelArticles.map((article) => {
             const author =
                 article.querySelector('[data-testid="User-Name"]')?.textContent?.trim() ?? "";
 

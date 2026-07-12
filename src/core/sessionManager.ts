@@ -11,6 +11,7 @@ export enum EchoState {
   READING = "READING",
   GENERATING = "GENERATING",
   REVIEWING = "REVIEWING",
+  PROCESSING = "PROCESSING",
   POSTING = "POSTING",
   RECOVERING = "RECOVERING"
 }
@@ -35,14 +36,26 @@ class SessionManager {
   }
 
   /**
-   * Check if currently busy (reviewing or posting)
-   * These are the states where other operations should pause
+   * Check if currently busy (reviewing, processing a tweet, or posting)
+   * These are the states where other operations (timeline reading, scrolling,
+   * navigation) should pause. PROCESSING covers the window where the browser
+   * worker has opened a tweet but has not yet entered the REVIEWING state.
    */
   isBusy(): boolean {
     return (
       this.state === EchoState.REVIEWING ||
+      this.state === EchoState.PROCESSING ||
       this.state === EchoState.POSTING
     );
+  }
+
+  /**
+   * Check if a tweet is currently being opened/processed by the browser worker.
+   * During this window the page is on a /status/ conversation page, so the
+   * timeline reader must NOT extract tweets from it.
+   */
+  isProcessing(): boolean {
+    return this.state === EchoState.PROCESSING;
   }
 
   /**
@@ -97,6 +110,25 @@ class SessionManager {
   startPosting(): void {
     if (this.isReviewing()) return;
     this.state = EchoState.POSTING;
+    this.notifyStateChange();
+  }
+
+  /**
+   * Set state to PROCESSING (browser worker has opened a tweet and is reading it
+   * before the review session starts). Extraction must pause during this window.
+   */
+  startProcessing(): void {
+    if (this.isReviewing()) return;
+    this.state = EchoState.PROCESSING;
+    this.notifyStateChange();
+  }
+
+  /**
+   * Leave PROCESSING state and return to IDLE.
+   */
+  endProcessing(): void {
+    if (this.state !== EchoState.PROCESSING) return;
+    this.state = EchoState.IDLE;
     this.notifyStateChange();
   }
 

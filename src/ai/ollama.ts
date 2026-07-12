@@ -20,7 +20,7 @@ export async function generateReply(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "qwen3:8b",
+      model: "gpt-oss:20b",
       stream: false,
       prompt,
     }),

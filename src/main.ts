@@ -6,6 +6,7 @@ import { extractCurrentTweet } from "./browser/extractTweet";
 import { isLoggedIn } from "./browser/isLoggedIn";
 import { log } from "./utils/logger";
 import { reviewSession } from "./cli/reviewSession";
+import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { MemoryRepository } from "./database/MemoryRepository";
 import { shouldReply } from "./filter/filterTweet";
 import { scrollTimeline } from "./browser/scroll";
@@ -63,15 +64,19 @@ async function checkStartup(page: any) {
 }
 
 // Process a single tweet
-async function processTweet(page: any, tweet: { id: string; url: string; author: string; text: string }) {
+async function processTweet(page: any, navigator: BrowserNavigator, tweet: { id: string; url: string; author: string; text: string }) {
   // Open the tweet
-  await openTweet(page, tweet.url);
+  await navigator.openTweet(tweet.url);
 
   // Extract current tweet details
   const details = await extractCurrentTweet(page);
 
-  // Run review session
-  const result = await reviewSession(page, {
+  if (!details) {
+    console.log("Could not extract tweet. Skipping.");
+    return;
+  }
+
+  const result = await reviewSession(page, navigator, {
     id: tweet.id,
     author: details.handle || tweet.author,
     text: details.text || tweet.text,
@@ -102,6 +107,7 @@ async function processTweet(page: any, tweet: { id: string; url: string; author:
 // Main loop
 async function main() {
   const page = await getPage();
+  const navigator = createNavigator(page);
 
   // Startup checks
   await checkStartup(page);
@@ -154,11 +160,10 @@ async function main() {
         console.log("=========================================\n");
 
         try {
-          await processTweet(page, tweet);
+          await processTweet(page, navigator, tweet);
         } catch (err) {
           console.error("Error processing tweet:", err);
-          // Recover by going back to timeline
-          await page.goto("https://x.com/home");
+          await navigator.navigateToTimeline();
           await page.waitForTimeout(2000);
         }
       }
@@ -168,8 +173,7 @@ async function main() {
       await scrollTimeline(page);
     } catch (err) {
       console.error("Error in main loop:", err);
-      // Recover
-      await page.goto("https://x.com/home");
+      await navigator.navigateToTimeline();
       await page.waitForTimeout(5000);
     }
   }

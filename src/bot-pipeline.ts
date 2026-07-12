@@ -9,6 +9,7 @@ import { isLoggedIn } from "./browser/isLoggedIn";
 import { enqueue, queueSize, QueueItem } from "./core/queue";
 import { runAIWorker } from "./workers/aiWorker";
 import { runBrowserWorker } from "./workers/browserWorker";
+import { createNavigator } from "./browser/BrowserNavigator";
 
 const DAILY_LIMIT = 40;
 
@@ -19,11 +20,12 @@ function randomDelay(min: number, max: number): number {
 
 async function main() {
   const page = await getPage();
+  const navigator = createNavigator(page);
   let replyCount = 0;
 
   // Start workers
   runAIWorker();
-  runBrowserWorker(page);
+  runBrowserWorker(page, navigator);
 
   while (replyCount < DAILY_LIMIT) {
     try {
@@ -36,9 +38,7 @@ async function main() {
       // Check if we should refresh the session
       if (shouldRefreshSession()) {
         log("Refreshing session...");
-        await page.goto("https://x.com/home", {
-          waitUntil: "networkidle"
-        });
+        await navigator.refreshSession();
         markSessionRefreshed();
       }
 
@@ -52,9 +52,7 @@ async function main() {
       // Check if timeline is stuck
       if (timelineLooksStuck()) {
         log("Timeline appears stuck. Refreshing...");
-        await page.goto("https://x.com/home", {
-          waitUntil: "networkidle"
-        });
+        await navigator.navigateToTimeline();
         resetTimelineState();
         continue;
       }
@@ -86,8 +84,8 @@ async function main() {
       await page.waitForTimeout(waitTime);
     } catch (err) {
       console.error("Error in main loop:", err);
-      log("Recovering by going to home timeline...");
-      await page.goto("https://x.com/home");
+      log("Recovering by going to i/timeline...");
+      await navigator.navigateToTimeline();
       await page.waitForTimeout(5000);
     }
   }

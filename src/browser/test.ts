@@ -20,6 +20,11 @@ async function main() {
 
   const details = await extractCurrentTweet(page);
 
+  if (!details) {
+    console.log("Could not extract tweet. Skipping.");
+    return;
+  }
+
   console.log("Extracted tweet:", details);
 
   const draft = await generateReply(details.text);

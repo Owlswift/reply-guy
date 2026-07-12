@@ -11,20 +11,15 @@ export interface TweetDetails {
 
 export async function extractCurrentTweet(
   page: Page
-): Promise<TweetDetails> {
+): Promise<TweetDetails | null> {
 
   // Wait for article with timeout
   try {
     await page.waitForSelector("article", { timeout: 5000 });
   } catch {
-    // If no article found, return empty
-    return {
-      author: "",
-      handle: "",
-      text: "",
-      fullText: "",
-      url: page.url()
-    };
+    // No article on the page (tweet deleted, layout changed, etc.) — a normal
+    // condition when automating X, not an error.
+    return null;
   }
 
   // Expand any "Show more" links first
@@ -33,32 +28,25 @@ export async function extractCurrentTweet(
   const articles = await page.locator("article").all();
 
   if (articles.length === 0) {
-    return {
-      author: "",
-      handle: "",
-      text: "",
-      fullText: "",
-      url: page.url()
-    };
+    return null;
   }
 
   // Get the author of the first article (root tweet)
   const firstArticle = articles[0];
   if (!firstArticle) {
-    return {
-      author: "",
-      handle: "",
-      text: "",
-      fullText: "",
-      url: page.url()
-    };
+    return null;
   }
 
-  const firstAuthor =
-    (await firstArticle
-      .locator('[data-testid="User-Name"]')
-      .first()
-      .textContent({ timeout: 3000 }))?.trim() ?? "";
+  let firstAuthor = "";
+  try {
+    firstAuthor =
+      (await firstArticle
+        .locator('[data-testid="User-Name"]')
+        .first()
+        .textContent({ timeout: 3000 }))?.trim() ?? "";
+  } catch {
+    return null;
+  }
 
   const handleMatch = firstAuthor.match(/@\w+/);
   const rootHandle = handleMatch?.[0] ?? "";
@@ -74,11 +62,16 @@ export async function extractCurrentTweet(
   const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
   for (const article of articles) {
-    const author =
-      (await article
-        .locator('[data-testid="User-Name"]')
-        .first()
-        .textContent({ timeout: 3000 }))?.trim() ?? "";
+    let author = "";
+    try {
+      author =
+        (await article
+          .locator('[data-testid="User-Name"]')
+          .first()
+          .textContent({ timeout: 3000 }))?.trim() ?? "";
+    } catch {
+      break;
+    }
 
     // Check if this is the same author (part of the thread)
     const authorHandleMatch = author.match(/@\w+/);
@@ -102,11 +95,16 @@ export async function extractCurrentTweet(
     }
 
     // Use first() to avoid strict mode violation
-    const text =
-      (await article
-        .locator('[data-testid="tweetText"]')
-        .first()
-        .textContent({ timeout: 3000 }))?.trim() ?? "";
+    let text = "";
+    try {
+      text =
+        (await article
+          .locator('[data-testid="tweetText"]')
+          .first()
+          .textContent({ timeout: 3000 }))?.trim() ?? "";
+    } catch {
+      break;
+    }
 
     if (text) {
       threadTexts.push(text);
@@ -118,6 +116,11 @@ export async function extractCurrentTweet(
 
   // Get the first tweet text for backward compatibility
   const firstText = threadTexts[0] ?? "";
+
+  // If we couldn't extract any text, there's nothing to reply to.
+  if (!firstText) {
+    return null;
+  }
 
   return {
     author: firstAuthor,

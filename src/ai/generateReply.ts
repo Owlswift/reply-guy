@@ -29,7 +29,7 @@ export async function generateReply(input: ReplyInput | string): Promise<string>
   const tweet = typeof input === "string" ? input : input.tweet;
 
   const response = await ollama.chat({
-    model: "qwen3:8b",
+    model: "gpt-oss:20b",
     options: {
       temperature: 0.9,
     },
@@ -47,9 +47,9 @@ Maximum 25 words.
 
 No hashtags.
 
-No emojis.
-
 No quotation marks.
+
+No dashes (-).
 
 No AI language.
 
@@ -58,6 +58,12 @@ Don't flatter people.
 Don't always agree.
 
 Be conversational.
+
+Match the tone of the tweet — if it's a greeting, reply with a simple greeting. If it's serious, be serious. If it's casual, be casual.
+
+Do not add political commentary unless the tweet is explicitly about politics.
+
+Do not start with a dash, asterisk, or any bullet point character.
 `
       },
       {
@@ -75,7 +81,13 @@ ${tweet}
     ]
   });
 
-  return response.message.content.trim();
+  let reply = response.message.content.trim();
+
+  // Strip dashes, asterisks, or bullet-point characters that models sometimes add
+  reply = reply.replace(/^[-*•]\s*/, "");
+  reply = reply.replace(/-/g, "");
+
+  return reply;
 }
 
 // Generate with quality control and deduplication
