@@ -7,9 +7,10 @@ export interface PromptInput {
     tweet: string;
     relationship: Relationship;
     memories: ReplyMemory[];
+    imageDescriptions?: string[] | undefined;
 }
 
 export function buildPrompt(input: PromptInput): string {
     const type = classifyTweet(input.tweet);
-    return buildPersonalityPrompt(input.tweet, input.relationship, type, input.memories);
+    return buildPersonalityPrompt(input.tweet, input.relationship, type, input.memories, input.imageDescriptions);
 }

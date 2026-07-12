@@ -1,6 +1,5 @@
 import { Page } from "playwright";
 import { generateReply } from "../ai/ollama";
-import { buildPrompt } from "../ai/buildPrompt";
 import { classifyTweet, TweetType } from "../ai/classifyTweet";
 import { prepareReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
@@ -43,14 +42,12 @@ export async function reviewSession(
         // Classify the tweet to decide how to handle it
         const tweetType: TweetType = classifyTweet(details.text);
 
-        const prompt = buildPrompt({
+        // Use existing draft if available, otherwise generate
+        let draft = details.existingDraft ?? await generateReply({
             tweet: details.text,
             relationship: details.relationship,
             memories
         });
-
-        // Use existing draft if available, otherwise generate
-        let draft = details.existingDraft ?? await generateReply(prompt);
         let terminalReply = draft;
 
         // Auto-approve well-wish tweets (happy sunday, happy new week, etc.) — no intervention needed
@@ -111,7 +108,11 @@ export async function reviewSession(
                 continue;
 
             case "regenerate":
-                draft = await generateReply(prompt);
+                draft = await generateReply({
+                    tweet: details.text,
+                    relationship: details.relationship,
+                    memories
+                });
                 terminalReply = draft;
                 // Return regen status to signal browser worker to put back in queue
                 return { status: "regen", draft };

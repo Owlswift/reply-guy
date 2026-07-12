@@ -23,11 +23,14 @@ import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { reviewSession, ReviewSessionDetails } from "./cli/reviewSession";
 import { stats } from "./stats/runtime";
+import { generateReply as generateReplyFromPrompt } from "./ai/ollama";
 import { generateReply } from "./ai/generateReply";
 import { buildPersonalityPrompt } from "./personality/prompt";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
+import { describeImages } from "./ai/vision";
+import { downloadImages, cleanupImages } from "./ai/downloadImage";
 
 const DAILY_LIMIT = 40;
 
@@ -174,17 +177,13 @@ async function main() {
           const memories = await memoryRepo.getRecentMemories(20);
           const tweetType = classifyTweet(item.text);
 
-          // Use buildPrompt which feeds memories + tweet type to the personality prompt
-          const { buildPrompt } = await import("./ai/buildPrompt");
-          const prompt = buildPrompt({
-            tweet: item.text,
-            relationship: "stranger",
-            memories
-          });
-
           let reply = "";
           for (let i = 0; i < 3; i++) {
-            reply = await generateReply(prompt);
+            reply = await generateReplyFromPrompt({
+              tweet: item.text,
+              relationship: "stranger",
+              memories
+            });
             if (validateReply(reply) && !isDuplicate(reply)) {
               break;
             }
@@ -266,12 +265,26 @@ async function main() {
           const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
 
           const memories = await memoryRepo.getRecentMemories(20);
-          const prompt = buildPrompt({
+
+          // Describe images if present
+          let autoImageDescriptions: string[] | undefined;
+          if (details.imageUrls && details.imageUrls.length > 0) {
+            log(`Describing ${details.imageUrls.length} image(s) via Gemma Vision...`);
+            try {
+              const localPaths = await downloadImages(details.imageUrls);
+              autoImageDescriptions = await describeImages(localPaths);
+              cleanupImages(localPaths);
+            } catch (err) {
+              log(`Vision failed for auto-post: ${err}`);
+            }
+          }
+
+          const autoDraft = await generateReplyFromPrompt({
             tweet: tweetText,
             relationship: readyItem.relationship || "stranger",
-            memories
+            memories,
+            ...(autoImageDescriptions ? { imageDescriptions: autoImageDescriptions } : {})
           });
-          const autoDraft = await generateReply(prompt);
 
           if (autoDraft) {
             try {

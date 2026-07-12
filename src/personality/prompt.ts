@@ -9,7 +9,8 @@ export function buildPersonalityPrompt(
   tweet: string,
   relationship: Relationship,
   type: TweetType,
-  memories: ReplyMemory[]
+  memories: ReplyMemory[],
+  imageDescriptions?: string[]
 ): string {
   // Prioritize edited replies (strongest learning signal)
   const sortedMemories = [...memories].sort((a, b) => {
@@ -111,8 +112,20 @@ Write ONE short greeting reply:
 `;
   }
 
+  // Build image context block if images were described
+  const imageContext = imageDescriptions && imageDescriptions.length > 0
+    ? `
+
+Image descriptions:
+
+${imageDescriptions.map((d, i) => `Image ${i + 1}: ${d}`).join("\n")}
+`
+    : "";
+
   return `
 You are writing replies exactly as I would.
+
+${imageContext}
 
 Study my previous replies carefully.
 

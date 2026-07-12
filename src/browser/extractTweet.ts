@@ -7,6 +7,7 @@ export interface TweetDetails {
   text: string;
   fullText: string;
   url: string;
+  imageUrls: string[];
 }
 
 export async function extractCurrentTweet(
@@ -117,6 +118,20 @@ export async function extractCurrentTweet(
   // Get the first tweet text for backward compatibility
   const firstText = threadTexts[0] ?? "";
 
+  // Extract images from the tweet
+  const imageUrls: string[] = [];
+  try {
+    const images = await firstArticle.locator('div[data-testid="tweetPhoto"] img').all();
+    for (const img of images) {
+      const src = await img.getAttribute("src");
+      if (src && !src.includes("profile_images") && !imageUrls.includes(src)) {
+        imageUrls.push(src);
+      }
+    }
+  } catch {
+    // No images — that's fine
+  }
+
   // If we couldn't extract any text, there's nothing to reply to.
   if (!firstText) {
     return null;
@@ -127,6 +142,7 @@ export async function extractCurrentTweet(
     handle: rootHandle,
     text: firstText,
     fullText,
-    url: page.url()
+    url: page.url(),
+    imageUrls
   };
 }
