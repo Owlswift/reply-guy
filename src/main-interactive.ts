@@ -18,7 +18,7 @@ import { markNotificationSeen, getNotificationProgress } from "./storage/seenNot
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet } from "./browser/extractTweet";
 import { readDelay, betweenRepliesDelay, maybeDistractedPause } from "./behavior/profiles";
-import { shouldTakeBreak, getBreakDuration } from "./behavior/scheduler";
+import { shouldTakeBreak, getBreakDuration, maybeBreakAfterReply, shouldQuitInsteadOfBreak } from "./behavior/scheduler";
 import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { reviewSession, ReviewSessionDetails } from "./cli/reviewSession";
@@ -333,6 +333,19 @@ async function main() {
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
           console.log(`\n✅ ${autoLabel} reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
+
+          // Random break or quit after each reply
+          const breakMs = maybeBreakAfterReply();
+          if (breakMs > 0) {
+            if (shouldQuitInsteadOfBreak()) {
+              log(`Taking a longer break — quitting. Restart me when you're ready.`);
+              console.log(`\n🛑 Echo paused after ${stats.posted} replies. Run again to continue.\n`);
+              await chatgpt.close();
+              process.exit(0);
+            }
+            log(`Random break: ${(breakMs / 60000).toFixed(1)} min...`);
+            await page.waitForTimeout(breakMs);
+          }
         } else {
           // ============================================================
           // PHASE 4b: AUTO-POST (ChatGPT draft, no review)
@@ -399,9 +412,16 @@ async function main() {
           const remaining = progress.total - progress.replied;
           console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
 
-          if (shouldTakeBreak(stats.posted)) {
-            const breakMs = getBreakDuration();
-            log(`Taking a longer break (${(breakMs / 60000).toFixed(0)} min)...`);
+          // Random break or quit after each reply
+          const breakMs = maybeBreakAfterReply();
+          if (breakMs > 0) {
+            if (shouldQuitInsteadOfBreak()) {
+              log(`Taking a longer break — quitting. Restart me when you're ready.`);
+              console.log(`\n🛑 Echo paused after ${stats.posted} replies. Run again to continue.\n`);
+              await chatgpt.close();
+              process.exit(0);
+            }
+            log(`Random break: ${(breakMs / 60000).toFixed(1)} min...`);
             await page.waitForTimeout(breakMs);
           }
         }
