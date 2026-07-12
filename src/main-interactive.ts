@@ -23,7 +23,7 @@ import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { reviewSession, ReviewSessionDetails } from "./cli/reviewSession";
 import { stats } from "./stats/runtime";
-import { generateReply } from "./ai/ollama";
+import { ChatGPTClient } from "./ai/chatgpt";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
@@ -48,6 +48,11 @@ async function main() {
   let replyCount = 0;
 
   log(`Behavior profile: ${getProfileLabel()}`);
+
+  // Initialize ChatGPT client (opens a new tab)
+  const chatgpt = new ChatGPTClient();
+  await chatgpt.init();
+  log("ChatGPT client ready");
 
   // Define source manager
   const sourceManager = new SourceManager([
@@ -186,7 +191,7 @@ async function main() {
 
           let reply = "";
           for (let i = 0; i < 3; i++) {
-            reply = await generateReply({
+            reply = await chatgpt.generateReply({
               tweet: item.text,
               relationship: "stranger",
               memories
@@ -285,7 +290,7 @@ async function main() {
             }
           }
 
-          const autoDraft = await generateReply({
+          const autoDraft = await chatgpt.generateReply({
             tweet: tweetText,
             relationship: readyItem.relationship || "stranger",
             memories,
