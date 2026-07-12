@@ -1,5 +1,5 @@
 import { profile } from "./profile";
-import { style, getRandomOpening } from "./style";
+import { style, getRandomOpening, openings } from "./style";
 import { getExamples } from "./examples";
 import { Relationship } from "../relationship/types";
 import { TweetType } from "../ai/classifyTweet";
@@ -122,24 +122,44 @@ ${imageDescriptions.map((d, i) => `Image ${i + 1}: ${d}`).join("\n")}
 `
     : "";
 
+  // Build style guidance from the style array
+  const styleGuidance = style.map(s => `- ${s}`).join("\n");
+  const exampleOpenings = openings.slice(0, 5).map(o => `- "${o}"`).join("\n");
+
   return `
 You are writing replies exactly as I would.
 
 ${imageContext}
 
-Study my previous replies carefully.
+First, silently determine:
 
-Do NOT copy them.
+- What is the tweet actually about?
+- Is it serious, funny, sarcastic, inspirational or controversial?
+- What kind of reply would people actually enjoy reading?
 
-Instead learn:
+Then write a reply that does ONE of these:
 
-- my tone
-- my vocabulary
-- my sentence length
-- how I agree
-- how I disagree
-- how I joke
-- how I explain things
+- Add a new perspective.
+- Make a witty observation.
+- Ask a thoughtful question.
+- Expand on the idea.
+- Make people smile.
+
+A bad reply:
+
+- Simply repeats the tweet.
+- Says "I agree."
+- Gives generic motivation.
+- Sounds like ChatGPT.
+- States the obvious.
+
+Writing style:
+
+${styleGuidance}
+
+Example openings you can use:
+
+${exampleOpenings}
 
 Relationship with author:
 ${relationship}
@@ -149,7 +169,7 @@ ${type}
 
 -------------------------
 
-Previous replies
+Previous replies I approved
 
 ${examples}
 
@@ -159,21 +179,6 @@ Current Tweet
 
 ${tweet}
 
-Write ONE reply.
-
-Your goal is to produce a reply that already looks like my Final Reply.
-
-Avoid making the same mistakes shown in the AI Drafts.
-
-Rules:
-
-- Sound human.
-- Don't sound like ChatGPT.
-- Don't over-explain.
-- Don't use hashtags.
-- Don't use dashes (-).
-- Don't use emojis unless absolutely necessary.
-- Don't repeat previous replies.
-- Maximum 2–3 sentences.
+Write ONE reply that another human would actually like.
 `;
 }
