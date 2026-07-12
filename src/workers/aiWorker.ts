@@ -1,11 +1,13 @@
 import { peek, dequeue, updateItem } from "../core/queue";
-import { generateReply } from "../ai/generateReply";
-import { buildPersonalityPrompt } from "../personality/prompt";
+import { runReplyPipeline } from "../ai/replyPipeline";
 import { validateReply } from "../personality/validator";
 import { isDuplicate } from "../personality/duplicate";
 import { log } from "../utils/logger";
 import { stats } from "../stats/runtime";
 import { sessionManager } from "../core/sessionManager";
+import { MemoryRepository } from "../database/MemoryRepository";
+
+const memoryRepo = new MemoryRepository();
 
 export async function runAIWorker() {
   while (true) {
@@ -32,25 +34,27 @@ export async function runAIWorker() {
     updateItem(item.id, { status: "drafting" });
 
     try {
-      // Build prompt
-      const prompt = buildPersonalityPrompt(item.text, "stranger", "general", []);
+      // Load past replies so the AI learns from your approved/edited responses
+      const memories = await memoryRepo.getRecentMemories(20);
 
-      // Generate reply with validation
-      let reply = "";
-      for (let i = 0; i < 3; i++) {
-        reply = await generateReply(prompt);
+      // Build few-shot examples from memories
+      const examples = memories.slice(0, 5).map(m => ({
+        tweet: m.tweetText,
+        reply: m.finalReply,
+      }));
 
-        if (validateReply(reply) && !isDuplicate(reply)) {
-          break;
-        }
-      }
+      // Run the full pipeline: Understand → Brainstorm → Write → Judge
+      const { bestReply } = await runReplyPipeline({
+        tweet: item.text,
+        author: item.author,
+        examples,
+      });
 
-      if (!reply) {
+      if (!bestReply || !validateReply(bestReply) || isDuplicate(bestReply)) {
         updateItem(item.id, {
           status: "failed",
           attempts: (item.attempts || 0) + 1
         });
-        // Remove from queue after max attempts to prevent infinite loop
         if ((item.attempts || 0) + 1 >= 3) {
           dequeue();
         }
@@ -60,7 +64,7 @@ export async function runAIWorker() {
       // Mark as ready for browser worker
       updateItem(item.id, {
         status: "ready",
-        draft: reply
+        draft: bestReply
       });
 
       stats.regenerated++;

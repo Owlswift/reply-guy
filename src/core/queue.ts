@@ -1,5 +1,5 @@
 import { Relationship } from "../relationship/types";
-import { TweetType } from "../ai/classifyTweet";
+import { TweetCategory } from "../types/analysis";
 
 export interface QueueItem {
   id: string;
@@ -7,7 +7,7 @@ export interface QueueItem {
   author: string;
   text: string;
   relationship?: Relationship;
-  tweetType?: TweetType;
+  tweetType?: TweetCategory;
   priority?: number;
   draft?: string | undefined;
   attempts?: number;

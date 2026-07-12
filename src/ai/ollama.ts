@@ -10,9 +10,9 @@ export async function generateReply(
   memories: ReplyMemory[] = []
 ) {
   // Support both old and new API
-  const prompt = typeof input === "string"
-    ? buildPrompt({ tweet: input, relationship, memories })
-    : buildPrompt(input);
+  const promptResult = typeof input === "string"
+    ? await buildPrompt({ tweet: input, relationship, memories })
+    : await buildPrompt(input);
 
   const response = await fetch(OLLAMA_URL, {
     method: "POST",
@@ -22,7 +22,7 @@ export async function generateReply(
     body: JSON.stringify({
       model: "gpt-oss:20b",
       stream: false,
-      prompt,
+      prompt: promptResult.prompt,
       options: {
         temperature: 0.7,
         top_p: 0.9,

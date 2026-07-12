@@ -1,6 +1,7 @@
 import { Page } from "playwright";
 import { generateReply } from "../ai/ollama";
-import { classifyTweet, TweetType } from "../ai/classifyTweet";
+import { classifyTweet } from "../ai/classifyTweet";
+import { TweetCategory } from "../types/analysis";
 import { prepareReply, clickReply } from "../reply/reply";
 import { reviewReply } from "./promptReply";
 import { chooseReplySource } from "./conflictPrompt";
@@ -9,6 +10,10 @@ import { MemoryRepository } from "../database/MemoryRepository";
 import { Relationship } from "../relationship/types";
 import { sessionManager } from "../core/sessionManager";
 import { BrowserNavigator } from "../browser/BrowserNavigator";
+import { renderCandidates } from "./renderScreen";
+import { readAction } from "./readKey";
+import chalk from "chalk";
+import readlineSync from "readline-sync";
 
 const memoryRepo = new MemoryRepository();
 
@@ -40,7 +45,7 @@ export async function reviewSession(
         console.log(`🧠 Loaded ${memories.length} past replies for learning (${memories.filter(m => m.wasEdited).length} were edited by you)\n`);
         
         // Classify the tweet to decide how to handle it
-        const tweetType: TweetType = classifyTweet(details.text);
+        const tweetType: TweetCategory = classifyTweet(details.text);
 
         // Use existing draft if available, otherwise generate
         let draft = details.existingDraft ?? await generateReply({
@@ -94,7 +99,47 @@ export async function reviewSession(
             };
         }
 
-        // First, review in terminal WITHOUT opening reply box
+        // ─── Generate 2 more candidates for variety ───────────────────────
+        console.log("\n  Generating alternative options...\n");
+        const candidates: string[] = [terminalReply];
+        for (let i = 0; i < 2; i++) {
+            const alt = await generateReply({
+                tweet: details.text,
+                relationship: details.relationship,
+                memories
+            });
+            if (alt && !candidates.includes(alt)) {
+                candidates.push(alt);
+            }
+        }
+
+        // ─── Show candidates and let user pick ──────────────────────────
+        renderCandidates(details.author, details.text, candidates);
+        const pick = readlineSync
+            .question(
+                chalk.cyan("Pick one: [") +
+                chalk.green("a") + chalk.cyan("/") + chalk.green("b") + chalk.cyan("/") + chalk.green("c") +
+                chalk.cyan("] edit [e] skip [s] regen [r] quit [q]: ")
+            )
+            .trim()
+            .toLowerCase();
+
+        if (pick === "s" || pick === "skip") {
+            return { status: "skipped" };
+        }
+        if (pick === "q" || pick === "quit") {
+            process.exit(0);
+        }
+        if (pick === "b" || pick === "2") {
+            terminalReply = candidates[1] ?? candidates[0]!;
+        } else if (pick === "c" || pick === "3") {
+            terminalReply = candidates[2] ?? candidates[0]!;
+        } else {
+            // Default: use first candidate (a, 1, edit, or anything else)
+            terminalReply = candidates[0]!;
+        }
+
+        // ─── Normal review loop ─────────────────────────────────────────
         while (true) {
             const review = await reviewReply(
                 details.author,
