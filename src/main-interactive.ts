@@ -335,46 +335,74 @@ async function main() {
           console.log(`\n✅ ${autoLabel} reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
         } else {
           // ============================================================
-          // PHASE 4b: REVIEW & POST (normal tweets)
+          // PHASE 4b: AUTO-POST (ChatGPT draft, no review)
           // ============================================================
-          log(`=== PHASE: REVIEW & POST ===`);
-          const reviewDetails: ReviewSessionDetails = {
-            id: readyItem.id,
-            author: details.handle || readyItem.author,
-            text: tweetText,
-            relationship: readyItem.relationship || "stranger",
-            existingDraft: readyItem.draft
-          };
-          
-          const result = await reviewSession(page, navigator, reviewDetails);
+          // REVIEW SESSION (commented out — auto-post instead):
+          // log(`=== PHASE: REVIEW & POST ===`);
+          // const reviewDetails: ReviewSessionDetails = {
+          //   id: readyItem.id,
+          //   author: details.handle || readyItem.author,
+          //   text: tweetText,
+          //   relationship: readyItem.relationship || "stranger",
+          //   existingDraft: readyItem.draft
+          // };
+          // const result = await reviewSession(page, navigator, reviewDetails);
+          // if (result.status === "posted") { ... }
+          // else if (result.status === "skipped") { ... }
+          // else if (result.status === "regen") { ... }
+          // else { ... }
 
-          if (result.status === "posted") {
-            markReplied(readyItem.id);
-            markNotificationReplied(readyItem.id);
-            dequeue();
-            replyCount++;
-            stats.posted++;
+          log(`=== AUTO-POST (ChatGPT) ===`);
+          console.log(`\n🤖 ChatGPT draft for @${details.handle || readyItem.author}:\n`);
+          console.log(`   ┌─ Tweet ─────────────────────────────────────`);
+          console.log(`   │ ${tweetText}`);
+          console.log(`   ├─ Draft ─────────────────────────────────────`);
+          console.log(`   │ ${readyItem.draft}`);
+          console.log(`   └─────────────────────────────────────────────\n`);
 
-            const progress = getNotificationProgress();
-            const remaining = progress.total - progress.replied;
-            console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
+          // Open reply box and type the draft
+          const { prepareReply, clickReply } = await import("./reply/reply");
+          const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
 
-            if (shouldTakeBreak(stats.posted)) {
-              const breakMs = getBreakDuration();
-              log(`Taking a longer break (${(breakMs / 60000).toFixed(0)} min)...`);
-              await page.waitForTimeout(breakMs);
+          try {
+            await prepareReply(page, readyItem.draft!);
+            const success = await clickReply(page, details.handle || readyItem.author);
+            if (success) {
+              // Save to memory
+              try {
+                await memoryRepo.saveMemory({
+                  id: "",
+                  tweetId: readyItem.id,
+                  tweetText,
+                  authorHandle: details.handle || readyItem.author,
+                  relationship: readyItem.relationship || "stranger",
+                  aiDraft: readyItem.draft || "",
+                  finalReply: readyItem.draft || "",
+                  wasEdited: false,
+                  approved: true,
+                  createdAt: new Date()
+                });
+                console.log(`🧠 Saved to memory.\n`);
+              } catch {}
             }
-          } else if (result.status === "skipped") {
-            dequeue();
-            stats.skipped++;
-            console.log("\nSkipped.\n");
-          } else if (result.status === "regen") {
-            updateItem(readyItem.id, { 
-              status: "ready",
-              draft: result.draft
-            });
-          } else {
-            updateItem(readyItem.id, { status: "ready" });
+          } catch (err) {
+            console.error(`Failed to auto-post:`, err);
+          }
+
+          markReplied(readyItem.id);
+          markNotificationReplied(readyItem.id);
+          dequeue();
+          replyCount++;
+          stats.posted++;
+
+          const progress = getNotificationProgress();
+          const remaining = progress.total - progress.replied;
+          console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
+
+          if (shouldTakeBreak(stats.posted)) {
+            const breakMs = getBreakDuration();
+            log(`Taking a longer break (${(breakMs / 60000).toFixed(0)} min)...`);
+            await page.waitForTimeout(breakMs);
           }
         }
 
