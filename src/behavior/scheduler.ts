@@ -21,22 +21,22 @@ export function getBreakDuration(): number {
 
 /**
  * Decide whether to take a random break after a reply.
- * ~20% chance per reply. Break duration: 1 minute to 1 hour.
+ * ~8% chance per reply (roughly 1 in 12). Break duration: 5 min to 3 hours.
  * Returns 0 if no break should be taken.
  */
 export function maybeBreakAfterReply(): number {
-  // ~20% chance to trigger a break
-  if (Math.random() > 0.2) return 0;
+  // ~8% chance to trigger a break — unpredictable, not too frequent
+  if (Math.random() > 0.08) return 0;
 
-  // 1 minute to 1 hour in milliseconds
-  return (60_000 + Math.random() * 3_540_000);
+  // 5 minutes to 3 hours in milliseconds
+  return (300_000 + Math.random() * 10_500_000);
 }
 
 /**
  * Decide whether to quit instead of taking a break.
- * ~50% chance when a break is triggered.
+ * ~30% chance when a break is triggered — mostly waits, sometimes quits.
  * If true, the app logs the message and exits so you can restart later.
  */
 export function shouldQuitInsteadOfBreak(): boolean {
-  return Math.random() < 0.5;
+  return Math.random() < 0.3;
 }
