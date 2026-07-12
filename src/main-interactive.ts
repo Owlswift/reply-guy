@@ -23,9 +23,7 @@ import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { reviewSession, ReviewSessionDetails } from "./cli/reviewSession";
 import { stats } from "./stats/runtime";
-import { generateReply as generateReplyFromPrompt } from "./ai/ollama";
-import { generateReply } from "./ai/generateReply";
-import { buildPersonalityPrompt } from "./personality/prompt";
+import { generateReply } from "./ai/ollama";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
@@ -179,7 +177,7 @@ async function main() {
 
           let reply = "";
           for (let i = 0; i < 3; i++) {
-            reply = await generateReplyFromPrompt({
+            reply = await generateReply({
               tweet: item.text,
               relationship: "stranger",
               memories
@@ -261,7 +259,6 @@ async function main() {
 
           // Open reply box and type the draft
           const { prepareReply, clickReply } = await import("./reply/reply");
-          const { buildPrompt } = await import("./ai/buildPrompt");
           const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
 
           const memories = await memoryRepo.getRecentMemories(20);
@@ -279,7 +276,7 @@ async function main() {
             }
           }
 
-          const autoDraft = await generateReplyFromPrompt({
+          const autoDraft = await generateReply({
             tweet: tweetText,
             relationship: readyItem.relationship || "stranger",
             memories,
