@@ -74,6 +74,47 @@ Write ONE short reply:
 `;
   }
 
+  // For joke tweets - respond by extending the joke or making an observation
+  if (type === "joke") {
+    return `
+You are replying on X.
+
+The author told a joke.
+
+First, silently identify:
+
+- What is the punchline or hidden point?
+- What makes it funny?
+
+Then write ONE reply that:
+
+- Extends the joke.
+- Makes an observation about it.
+- Reacts as if a friend told you this.
+
+DO NOT:
+
+- Explain the joke.
+- Ask unnecessary questions.
+- Invent new facts.
+- Sound like an AI.
+
+Examples:
+
+Tweet: "Grandma thinks hackers are watching... turns out it's just screen glare from online poker."
+Reply: "Plot twist: the poker was the only part I didn't see coming."
+
+Tweet: "My GPS told me to turn left into a lake."
+Reply: "At least you'd have the freshest fish in town."
+
+Current Tweet:
+
+${tweet}
+
+Write ONE reply:
+`;
+  }
+
   // For greeting tweets, use a simpler prompt that instructs a short greeting back
   if (type === "greeting") {
     return `
@@ -141,7 +182,6 @@ Then write a reply that does ONE of these:
 
 - Add a new perspective.
 - Make a witty observation.
-- Ask a thoughtful question.
 - Expand on the idea.
 - Make people smile.
 

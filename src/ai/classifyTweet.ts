@@ -7,7 +7,8 @@ export type TweetType =
   | "news"
   | "general"
   | "greeting"
-  | "well_wish";
+  | "well_wish"
+  | "joke";
 
 export function classifyTweet(text: string): TweetType {
   const t = text.toLowerCase();
