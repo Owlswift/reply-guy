@@ -65,25 +65,13 @@ export class BrowserNavigator {
         return true;
       }
 
-      // Wait for the Posts feed to open and verify we're on i/timeline
+      // Wait for articles to render after clicking the card
       try {
         await this.page.locator("article").first().waitFor({
-          timeout: 5000
+          timeout: 10000
         });
       } catch {
         return false;
-      }
-
-      // Verify we landed on the i/timeline page (the filtered posts feed)
-      const finalUrl = this.page.url();
-      if (!finalUrl.includes("/i/timeline")) {
-        console.log("Did not land on i/timeline page, navigating directly...");
-        await this.navigateToTimeline();
-        try {
-          await this.page.locator("article").first().waitFor({ timeout: 10000 });
-        } catch {
-          return false;
-        }
       }
 
       return true;

@@ -24,6 +24,10 @@ const selectStmt = db.prepare(`
 SELECT 1 FROM seen_notifications WHERE tweet_id = ?
 `);
 
+const selectRepliedStmt = db.prepare(`
+SELECT replied FROM seen_notifications WHERE tweet_id = ?
+`);
+
 const markRepliedStmt = db.prepare(`
 UPDATE seen_notifications SET replied = 1 WHERE tweet_id = ?
 `);
@@ -43,6 +47,11 @@ export function markNotificationSeen(tweetId: string, tweetUrl: string): void {
 export function isNotificationSeen(tweetId: string): boolean {
   const row = selectStmt.get(tweetId);
   return !!row;
+}
+
+export function hasNotificationReplied(tweetId: string): boolean {
+  const row = selectRepliedStmt.get(tweetId);
+  return row ? row.replied === 1 : false;
 }
 
 export function markNotificationReplied(tweetId: string): void {

@@ -6,7 +6,7 @@ import { isLoggedIn } from "./browser/isLoggedIn";
 import { enqueue, queueSize, getQueue, QueueItem, peek, dequeue, updateItem, reRankQueue, clearQueue } from "./core/queue";
 import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
-import { getNotificationProgress } from "./storage/seenNotifications";
+import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
 import { scoreTweet, shouldSkipDueToAgeAndReplies } from "./decision/scoreTweet";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
@@ -234,6 +234,9 @@ async function main() {
           continue;
         }
 
+        // Mark as seen in the database
+        markNotificationSeen(tweet.id, tweet.url);
+
         const item: QueueItem = {
           id: tweet.id,
           url: tweet.url,
@@ -291,6 +294,13 @@ async function main() {
           log(`=== PHASE: OPEN TWEET ${item.id} ===`);
           stats.tweets++;
 
+          // Check if already replied BEFORE opening the tweet
+          if (hasNotificationReplied(item.id)) {
+            log(`Already replied to ${item.id}. Skipping.`);
+            dequeue();
+            continue;
+          }
+
           await navigator.openTweet(item.url);
 
           // Skip if we can't reply
@@ -327,6 +337,39 @@ async function main() {
           }
           if (yourReplyCount > 0) {
             log(`Already replied to ${item.id} manually. Skipping.`);
+            // Mark as replied in the database to prevent future checks
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // ============================================================
+          // Check if @unfairleverage is allowed to reply to this post.
+          // X shows different signals for restricted replies:
+          // - Reply button is greyed out / disabled
+          // - "You can't reply" message is visible
+          // - "You're unable to reply" toast or notice
+          // - Only verified accounts / people @mentioned can reply
+          // ============================================================
+          const canReply = await page.evaluate(() => {
+            const replyBtn = document.querySelector('[data-testid="reply"]');
+            // No reply button at all — can't reply
+            if (!replyBtn) return false;
+            // Button has disabled attribute or aria-disabled
+            if (replyBtn.hasAttribute('disabled') || replyBtn.getAttribute('aria-disabled') === 'true') return false;
+            // Check for "You can't reply" text near the button or in the conversation
+            const disabledTexts = document.querySelectorAll('span, div');
+            for (const el of disabledTexts) {
+              const text = el.textContent?.trim() || '';
+              if (text.includes("can't reply") || text.includes("unable to reply") || text.includes("You can't") || text.includes("replies are limited") || text.includes("only people")) {
+                return false;
+              }
+            }
+            return true;
+          }) as boolean;
+          if (!canReply) {
+            log(`Cannot reply to ${item.id} — replies are restricted. Skipping.`);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -569,6 +612,7 @@ async function main() {
               const existing2 = getQueue().find((q: QueueItem) => q.id === ft.id);
               if (existing2) continue;
               if (Math.random() > replyRatio2) continue;
+              markNotificationSeen(ft.id, ft.url);
               enqueue({ id: ft.id, url: ft.url, author: ft.author, text: ft.text, createdAt: Date.now(), status: "pending" }, ft);
             }
             reRankQueue();

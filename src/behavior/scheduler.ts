@@ -74,6 +74,14 @@ export function getSessionFatigue(): number {
   return sessionFatigue;
 }
 
+export function getCurrentPlan(): TodayPlan | null {
+  return currentPlan;
+}
+
+export function getCurrentSessionIndex(): number {
+  return currentSessionIndex;
+}
+
 export function getSessionName(): string {
   if (!currentPlan || currentSessionIndex >= currentPlan.sessions.length) {
     return "Idle";
@@ -197,6 +205,35 @@ export function advanceSession(): boolean {
 }
 
 /**
+ * Force-start a session immediately, overriding the scheduler's time check.
+ * Sets the current session's startAt to now so isInSession() returns true.
+ * If all sessions have passed, creates a new session on the fly.
+ */
+export function forceStartSession(): void {
+  if (!currentPlan) return;
+  const now = new Date();
+  const currentHour = now.getHours() + now.getMinutes() / 60;
+
+  // If past the last session, append a new one
+  if (currentSessionIndex >= currentPlan.sessions.length) {
+    currentPlan.sessions.push({
+      name: "Override",
+      startAt: currentHour - 0.01,
+      endAt: currentHour + 1.5,
+      duration: 90,
+      intensity: "heavy",
+      repliesInSession: 300,
+    });
+    currentSessionIndex = currentPlan.sessions.length - 1;
+  } else {
+    currentPlan.sessions[currentSessionIndex]!.startAt = currentHour - 0.01;
+    currentPlan.sessions[currentSessionIndex]!.endAt = currentHour + 1.5;
+  }
+  currentSessionReplies = 0;
+  sessionFatigue = 0;
+}
+
+/**
  * Called after each reply in the current session.
  * Updates fatigue and checks if session reply limit is reached.
  * Returns true if the session should end (reached reply limit).
@@ -274,20 +311,35 @@ export function getReadingTime(text: string): number {
 
 /**
  * Small filler action like scrolling, skipping, or pausing mid-session.
+ * Scales with fatigue — fast at start, slower after ~15 min.
  * Returns milliseconds.
  */
 export function getMicroBreak(): number {
-  // 5–30 seconds — simulating checking another tab, thinking, etc.
-  return 5_000 + Math.random() * 25_000;
+  // Base: 2–8s when fresh, grows to 5–30s when fatigued
+  const baseMin = 2_000;
+  const baseMax = 8_000;
+  const fatigueMin = 5_000;
+  const fatigueMax = 30_000;
+  const min = baseMin + (fatigueMin - baseMin) * sessionFatigue;
+  const max = baseMax + (fatigueMax - baseMax) * sessionFatigue;
+  return Math.round(min + Math.random() * (max - min));
 }
 
 /**
  * Delay between finishing reading and starting to reply.
  * Simulates "deciding what to say."
+ * Scales with fatigue — fast at start, slower after ~15 min.
  * Returns milliseconds.
  */
 export function getThinkingTime(): number {
-  return 3_000 + Math.random() * 12_000;
+  // Base: 1–4s when fresh, grows to 3–12s when fatigued
+  const baseMin = 1_000;
+  const baseMax = 4_000;
+  const fatigueMin = 3_000;
+  const fatigueMax = 12_000;
+  const min = baseMin + (fatigueMin - baseMin) * sessionFatigue;
+  const max = baseMax + (fatigueMax - baseMax) * sessionFatigue;
+  return Math.round(min + Math.random() * (max - min));
 }
 
 /**
@@ -296,20 +348,34 @@ export function getThinkingTime(): number {
  * Returns milliseconds.
  */
 export function getPostReplyPause(): number {
-  const base = 8_000 + Math.random() * 15_000;
-  const fatigueMultiplier = 1 + sessionFatigue * 0.5;
-  return Math.round(base * fatigueMultiplier);
+  // Base: 3–8s when fresh, grows to 8–23s when fatigued
+  const baseMin = 3_000;
+  const baseMax = 8_000;
+  const fatigueMin = 8_000;
+  const fatigueMax = 23_000;
+  const min = baseMin + (fatigueMin - baseMin) * sessionFatigue;
+  const max = baseMax + (fatigueMax - baseMax) * sessionFatigue;
+  return Math.round(min + Math.random() * (max - min));
 }
 
 /**
  * Occasional random interruption — checking notifications, getting distracted.
- * ~15% chance. Returns 0 if no interruption.
+ * ~10% chance when fresh, up to ~20% when fatigued.
+ * Returns 0 if no interruption.
  */
 export function maybeInterruption(): number {
-  if (Math.random() > 0.15) return 0;
+  // Interruption chance scales with fatigue: 10% → 20%
+  const chance = 0.10 + sessionFatigue * 0.10;
+  if (Math.random() > chance) return 0;
 
-  // 30 seconds to 4 minutes
-  return 30_000 + Math.random() * 210_000;
+  // Duration: 15–60s when fresh, 30s–4min when fatigued
+  const baseMin = 15_000;
+  const baseMax = 60_000;
+  const fatigueMin = 30_000;
+  const fatigueMax = 240_000;
+  const min = baseMin + (fatigueMin - baseMin) * sessionFatigue;
+  const max = baseMax + (fatigueMax - baseMax) * sessionFatigue;
+  return Math.round(min + Math.random() * (max - min));
 }
 
 /**

@@ -1,6 +1,26 @@
 import { TimelineTweet } from "../types/tweet";
 
 /**
+ * Priority handles — tweets from these authors get a flat score bonus
+ * so they rank higher in the queue regardless of age/replies.
+ * Edit this list to add your priority accounts.
+ */
+const PRIORITY_HANDLES: string[] = [
+  // Add handles here e.g. "elonmusk", "fabrizioromano"
+  "@EricLDaugh",
+  "@Read_Meee",
+  "@KAHALA123Y",
+  "@AlexHormozi",
+  "@piersmorgan",
+  "@sama",
+  "@wak2433",
+  "@unkonfined",
+  "@Anathenumberone"
+];
+
+const PRIORITY_BONUS = 30; // flat score boost for priority handles
+
+/**
  * Compute how visible a new reply on this tweet is likely to be.
  *
  * We care about two things:
@@ -14,9 +34,10 @@ import { TimelineTweet } from "../types/tweet";
  *   AuthorScore (0–100) = 10% weight
  *   RelationshipScore (0–100) = 5% weight
  *   TopicScore (0–100) = 10% weight
+ *   PriorityBonus = flat +30 if author is in priority list
  *
  * Total = AgeScore * 0.45 + ReplyScore * 0.30 + AuthorScore * 0.10
- *       + RelationshipScore * 0.05 + TopicScore * 0.10
+ *       + RelationshipScore * 0.05 + TopicScore * 0.10 + PriorityBonus
  */
 
 // ──────────────────────────────────────────────────
@@ -82,6 +103,17 @@ function topicScore(_text: string): number {
 // ──────────────────────────────────────────────────
 // Main scorer
 // ──────────────────────────────────────────────────
+/**
+ * Check if the author is a priority handle and return bonus.
+ */
+function priorityBonus(author: string, username: string): number {
+  const normalized = author.replace(/^@/, "").toLowerCase();
+  const normalizedUser = username.toLowerCase();
+  return PRIORITY_HANDLES.some(
+    h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
+  ) ? PRIORITY_BONUS : 0;
+}
+
 export function scoreTweet(tweet: TimelineTweet): number {
   const now = Date.now();
   const ageMs = now - tweet.createdAt.getTime();
@@ -92,14 +124,16 @@ export function scoreTweet(tweet: TimelineTweet): number {
   const auScore = authorScore(tweet.verified, tweet.likes);
   const relScore = relationshipScore(tweet.following);
   const tScore  = topicScore(tweet.text);
+  const pBonus  = priorityBonus(tweet.author, tweet.username);
 
-  // Weighted sum
+  // Weighted sum + priority bonus
   const total =
     aScore  * 0.45 +
     rScore  * 0.30 +
     auScore * 0.10 +
     relScore * 0.05 +
-    tScore  * 0.10;
+    tScore  * 0.10 +
+    pBonus;
 
   // Round to integer
   return Math.round(total);

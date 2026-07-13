@@ -186,7 +186,7 @@ export async function reviewSession(
         }
 
         // Final confirmation
-        const confirmed = await confirmPost(terminalReply);
+        const confirmed = await confirmPost("Post this reply?");
         if (!confirmed) {
             return { status: "cancelled" };
         }
