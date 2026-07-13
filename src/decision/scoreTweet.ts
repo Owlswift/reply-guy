@@ -21,6 +21,17 @@ const PRIORITY_HANDLES: string[] = [
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
 
 /**
+ * Urgent handles — tweets from these authors are treated with maximum priority.
+ * They bypass age/reply skips, spam filters, and score thresholds.
+ * The massive bonus ensures they always rank at the top of the queue.
+ */
+const URGENT_HANDLES: string[] = [
+  "@WatcherGuru"
+];
+
+const URGENT_BONUS = 1000; // massive score boost for urgent handles
+
+/**
  * Compute how visible a new reply on this tweet is likely to be.
  *
  * We care about two things:
@@ -103,6 +114,18 @@ function topicScore(_text: string): number {
 // ──────────────────────────────────────────────────
 // Main scorer
 // ──────────────────────────────────────────────────
+
+/**
+ * Check if the author is an urgent handle.
+ */
+export function isUrgent(author: string, username: string): boolean {
+  const normalized = author.replace(/^@/, "").toLowerCase();
+  const normalizedUser = username.toLowerCase();
+  return URGENT_HANDLES.some(
+    h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
+  );
+}
+
 /**
  * Check if the author is a priority handle and return bonus.
  */
@@ -112,6 +135,13 @@ function priorityBonus(author: string, username: string): number {
   return PRIORITY_HANDLES.some(
     h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
   ) ? PRIORITY_BONUS : 0;
+}
+
+/**
+ * Check if the author is an urgent handle and return the urgent bonus.
+ */
+function urgentBonus(author: string, username: string): number {
+  return isUrgent(author, username) ? URGENT_BONUS : 0;
 }
 
 export function scoreTweet(tweet: TimelineTweet): number {
@@ -125,15 +155,17 @@ export function scoreTweet(tweet: TimelineTweet): number {
   const relScore = relationshipScore(tweet.following);
   const tScore  = topicScore(tweet.text);
   const pBonus  = priorityBonus(tweet.author, tweet.username);
+  const uBonus  = urgentBonus(tweet.author, tweet.username);
 
-  // Weighted sum + priority bonus
+  // Weighted sum + priority bonus + urgent bonus
   const total =
     aScore  * 0.45 +
     rScore  * 0.30 +
     auScore * 0.10 +
     relScore * 0.05 +
     tScore  * 0.10 +
-    pBonus;
+    pBonus +
+    uBonus;
 
   // Round to integer
   return Math.round(total);
@@ -152,6 +184,9 @@ export function scoreTweet(tweet: TimelineTweet): number {
  *   - Age > 30 min AND replies > 250 → skip
  */
 export function shouldSkipDueToAgeAndReplies(tweet: TimelineTweet): boolean {
+  // Urgent handles (e.g. @WatcherGuru) are never skipped due to age/replies
+  if (isUrgent(tweet.author, tweet.username)) return false;
+
   const now = Date.now();
   const ageMs = now - tweet.createdAt.getTime();
   const ageMinutes = Math.max(0, ageMs / 60_000);

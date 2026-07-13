@@ -443,26 +443,28 @@ async function main() {
         }
       }
 
-      const readyItem = peek();
-      if (!readyItem || readyItem.status !== "ready") {
+      // Use the same item that was just set to "ready" — don't re-peek
+      // because peek() returns the highest-scored item, and another
+      // higher-scored item that's still "pending" could jump ahead.
+      if (item.status !== "ready") {
         await new Promise(r => setTimeout(r, 500));
         continue;
       }
 
-      updateItem(readyItem.id, { status: "processing" });
+      updateItem(item.id, { status: "processing" });
 
       try {
         // Re-extract tweet details (the page is still open from the pending phase)
         const details = await extractCurrentTweet(page);
         if (!details) {
-          log(`Cannot extract tweet ${readyItem.id}. Skipping.`);
+          log(`Cannot extract tweet ${item.id}. Skipping.`);
           await navigator.returnToTimeline();
           dequeue();
           continue;
         }
 
         // Reading time — scales with fatigue
-        const tweetText = details.fullText || details.text || readyItem.text;
+        const tweetText = details.fullText || details.text || item.text;
         const readTime = getReadingTime(tweetText);
         await page.waitForTimeout(readTime);
 
@@ -506,15 +508,15 @@ async function main() {
           if (autoDraft) {
             try {
               await prepareReply(page, autoDraft);
-              const success = await clickReply(page, details.handle || readyItem.author);
+              const success = await clickReply(page, details.handle || item.author);
               if (success) {
                 try {
                   await memoryRepo.saveMemory({
                     id: "",
-                    tweetId: readyItem.id,
+                    tweetId: item.id,
                     tweetText,
-                    authorHandle: details.handle || readyItem.author,
-                    relationship: readyItem.relationship || "stranger",
+                    authorHandle: details.handle || item.author,
+                    relationship: item.relationship || "stranger",
                     aiDraft: `auto-${autoLabel}`,
                     finalReply: autoDraft,
                     wasEdited: false,
@@ -529,8 +531,8 @@ async function main() {
             }
           }
 
-          markReplied(readyItem.id);
-          markNotificationReplied(readyItem.id);
+          markReplied(item.id);
+          markNotificationReplied(item.id);
           dequeue();
           stats.posted++;
 
@@ -547,29 +549,29 @@ async function main() {
           // PHASE 4b: AUTO-POST (ChatGPT draft)
           // ============================================================
           log(`=== AUTO-POST (ChatGPT) ===`);
-          console.log(`\n${chalk.green("🤖 ChatGPT draft for @" + (details.handle || readyItem.author))}:\n`);
+          console.log(`\n${chalk.green("🤖 ChatGPT draft for @" + (details.handle || item.author))}:\n`);
           console.log(chalk.yellow(`   ┌─ Tweet ─────────────────────────────────────`));
           console.log(chalk.yellow(`   │ ${tweetText}`));
           console.log(chalk.green(`   ├─ Draft ─────────────────────────────────────`));
-          console.log(chalk.green(`   │ ${readyItem.draft}`));
+          console.log(chalk.green(`   │ ${item.draft}`));
           console.log(chalk.green(`   └─────────────────────────────────────────────\n`));
 
           const { prepareReply, clickReply } = await import("./reply/reply");
           const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
 
           try {
-            await prepareReply(page, readyItem.draft!);
-            const success = await clickReply(page, details.handle || readyItem.author);
+            await prepareReply(page, item.draft!);
+            const success = await clickReply(page, details.handle || item.author);
             if (success) {
               try {
                 await memoryRepo.saveMemory({
                   id: "",
-                  tweetId: readyItem.id,
+                  tweetId: item.id,
                   tweetText,
-                  authorHandle: details.handle || readyItem.author,
-                  relationship: readyItem.relationship || "stranger",
-                  aiDraft: readyItem.draft || "",
-                  finalReply: readyItem.draft || "",
+                  authorHandle: details.handle || item.author,
+                  relationship: item.relationship || "stranger",
+                  aiDraft: item.draft || "",
+                  finalReply: item.draft || "",
                   wasEdited: false,
                   approved: true,
                   createdAt: new Date()
@@ -581,8 +583,8 @@ async function main() {
             console.error(`Failed to auto-post:`, err);
           }
 
-          markReplied(readyItem.id);
-          markNotificationReplied(readyItem.id);
+          markReplied(item.id);
+          markNotificationReplied(item.id);
           dequeue();
           stats.posted++;
 
@@ -651,7 +653,7 @@ async function main() {
         }
 
       } catch (err) {
-        log(`Cannot reply to tweet ${readyItem.id}. Skipping.`);
+        log(`Cannot reply to tweet ${item.id}. Skipping.`);
         await notificationSource.returnToPostsFeed(navigator);
         dequeue();
       }

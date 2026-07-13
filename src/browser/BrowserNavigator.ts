@@ -90,10 +90,17 @@ export class BrowserNavigator {
     log("[Navigator] Navigating to i/timeline");
     await this.page.goto("https://x.com/i/timeline", { 
       waitUntil: "domcontentloaded",
-      timeout: 10000 
+      timeout: 15000 
     });
-    
-    await this.page.waitForLoadState("networkidle", { timeout: 15000 });
+
+    // Wait for articles to render — don't wait for networkidle because
+    // X.com maintains persistent WebSocket connections for real-time feed
+    // updates, meaning network idle is never truly reached on the feed page.
+    try {
+      await this.page.waitForSelector("article", { timeout: 15000 });
+    } catch {
+      log("[Navigator] No articles found on timeline, continuing anyway");
+    }
   }
 
 
