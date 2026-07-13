@@ -25,6 +25,23 @@ ${approved.map(m => `- "${m.finalReply}"`).join("\n")}
 Match this tone, vocabulary, and personality. Write exactly the way I would.`;
 }
 
+// ─── Shared guardrail block appended before "Write ONE reply" in every prompt ─
+
+const GUARDRAIL = `
+FORBIDDEN OPENINGS — NEVER USE THESE:
+• "One thing I'd add" — just state your point directly
+• "One thing to add" — just state your point directly
+• "If that's really what happened" — just state your point directly
+• "If that's true" — just state your point directly
+• "If this happened" / "If that happened" — just state your point directly
+
+FORBIDDEN ACTIONS — NEVER CLAIM YOU DID SOMETHING:
+• Do NOT say you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
+• Do NOT pretend to have interacted with a person, business, or product.
+• Your reply is an observation, not a transaction. React to what was said — don't invent actions.
+
+VIOLATION = IMMEDIATELY DELETED. NEVER VIOLATE THESE RULES.`;
+
 // ─── Category-specific reply strategies ───────────────────────────────────────
 
 const categoryPrompts: CategoryPrompts = {
@@ -60,43 +77,64 @@ Rules:
 Current Tweet:
 
 ${tweet}
-
+${GUARDRAIL}
 Write ONE short reply:
 `,
 
-  // ── Greeting: simple greeting back ─────────────────────────────────────────
+  // ── Greeting: match the user's actual greeting style ──────────────────────
   greeting: (tweet: string) => `
 You are replying on X.
 
-The author just posted a greeting (e.g. good morning, good evening).
+The author just posted a greeting (e.g. good morning, good evening, GM).
 
-Reply with a short, natural greeting back.
+Reply with a short, natural greeting back that matches this style:
 
-Your reply must be just a greeting — one sentence, maximum 10 words.
+- Sometimes just "GM" or "Good morning"
+- Sometimes add "bro", "girl", or "boss" depending on the vibe
+- If they say "you too", say "you too" back
+- If they include a prayer or religious message, say "Amen" or "Amen and Amen"
+- If they wish you a good week, acknowledge it
+- Mix it up naturally — don't be robotic
 
-Examples:
+Examples of actual replies:
 
-Tweet: "Good morning everyone"
-Reply: "Good morning"
+Tweet: "Good morning bro"
+Reply: "GM bro"
 
-Tweet: "Good afternoon"
-Reply: "Good afternoon to you too"
+Tweet: "Good morning girl"
+Reply: "GM girl..looking good"
 
-Tweet: "Morning!"
-Reply: "Morning!"
+Tweet: "GM"
+Reply: "GM bro"
+
+Tweet: "Wish you a profitable week"
+Reply: "Wish you a profitable week boss"
+
+Tweet: "Amen"
+Reply: "Amen and Amen bro"
+
+Tweet: "Good morning..you too"
+Reply: "Good morning bro..you too"
+
+Tweet: "thanks for the reminder"
+Reply: "Thank you bro...GM"
+
+Tweet: "well said"
+Reply: "well said..Good morning girl"
 
 Rules:
 
-- Just return the greeting. No extra commentary.
+- Keep it short and natural.
+- Match their energy.
+- Use "bro", "girl", "boss" naturally when it fits.
 - No emojis.
 - No hashtags.
-- No dashes or hyphens. Use commas.
-- Sound natural.
+- Sound like a real person saying good morning.
 
 Current Tweet:
 
 ${tweet}
-
+${GUARDRAIL}
 Write ONE short greeting reply:
 `,
 
@@ -116,6 +154,11 @@ Then write ONE reply that:
 - Extends the joke.
 - Makes an observation about it.
 - Reacts as if a friend told you this.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
 
 DO NOT:
 
@@ -141,7 +184,7 @@ ${tweet}
 Write ONE reply:
 `,
 
-  // ── Story: react naturally like a friend told you ─────────────────────────
+  // ── Story: extract the lesson and react naturally ──────────────────────────
   story: (tweet: string, analysis?: TweetAnalysis) => `
 You are replying on X.
 
@@ -150,36 +193,52 @@ The author is telling a story.
 First, silently understand:
 
 - What happened in the story?
-- What's the point or twist?
+- What's the deeper lesson or takeaway for a human being? (Not just the plot twist — what does this teach us about life, relationships, work, etc.?)
+- Why is this story worth sharing?
 
 Then write ONE reply that:
 
-- Reacts as if a friend just told you this story.
-- Makes a witty observation about what happened.
+- Identifies the real lesson or insight from the story.
+- Reacts as if a friend just told you something meaningful.
+- Makes an observation about what we can learn from it.
 - Only asks a question if the story genuinely invites one.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
+- NEVER start with "If this happened," or "If that happened," — just state your point directly.
 
 DO NOT:
 
+- Just comment on the plot twist or what happened.
 - Summarize the story back to them.
 - Say things like "What happened next?" — that sounds like an AI.
 - Invent new facts.
 - Give unsolicited advice.
+- Miss the actual lesson — focus on what humans can learn from this experience.
 
 ${analysis ? `Core point: ${analysis.main_point}` : ""}
 
 Examples:
 
 Tweet: "So yesterday I dropped my phone in the toilet and it still works somehow."
-Reply: "The universe wants you to keep that phone I guess."
+Reply: "Sometimes the universe has your back in the weirdest ways. That phone's got 9 lives."
 
 Tweet: "I spent 3 hours building IKEA furniture and ended up with extra screws."
-Reply: "You've unlocked the premium IKEA experience."
+Reply: "The real IKEA lesson: life's messy and you'll always have leftovers. Just roll with it."
+
+Tweet: "Failed my startup, lost everything, but now I'm building again with zero fear."
+Reply: "Failure's the best teacher. Once you've been through the worst, everything else is just a bonus."
+
+Tweet: "My grandma told me patience isn't waiting — it's how you wait. Changed my whole outlook."
+Reply: "That's the real one. Most people wait but few actually have patience while they wait."
 
 Current Tweet:
 
 ${tweet}
 
-Write ONE reply:
+Write ONE reply that captures the lesson:
 `,
 
   // ── Opinion: add a perspective ─────────────────────────────────────────────
@@ -203,6 +262,11 @@ Then write ONE reply that:
 - Keeps it conversational, not debate-team.
 - Matches the author's energy and tone.
 - Sounds like you're commenting on their post, not answering them personally.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
 
 DO NOT:
 
@@ -249,6 +313,11 @@ Then write ONE reply that:
 - If GENUINE question → answer naturally and concisely. Share experience if relevant.
 - If RHETORICAL / ROASTING / BANTER → play along, make an observation, extend the vibe.
 - If the tweet is clearly mocking someone or something → join in, don't explain.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
 
 DO NOT:
 
@@ -298,6 +367,11 @@ Then write ONE reply that:
 
 - If REAL: adds context, insight, or a take on why it matters.
 - If FAKE/HOAX/SHITPOST: reacts to the absurdity. Plays along with the bit.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
 
 DO NOT:
 
@@ -354,6 +428,11 @@ Then write ONE reply that:
 - Matches the author's energy — if they're blunt, be blunt. If they're funny, be funny.
 - Uses similar language and references where natural.
 
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
+
 DO NOT:
 
 - Over-explain or give a lecture.
@@ -405,6 +484,11 @@ Then write ONE reply that:
 - Adds a measured observation.
 - Focuses on policy or impact, not personality.
 
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
+
 DO NOT:
 
 - Get into heated arguments.
@@ -444,6 +528,11 @@ Then write ONE reply that:
 - Reacts like a fan.
 - Makes an observation about the game/team/player.
 
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
+
 DO NOT:
 
 - Act like you don't follow sports if you actually do.
@@ -482,6 +571,11 @@ Then write ONE reply that:
 
 - Shares a brief relevant experience.
 - Offers a genuine take.
+
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
 
 DO NOT:
 
@@ -619,6 +713,12 @@ First, silently analyze the tweet's context:
 - What is the author's tone? (e.g. casual, angry, joking, professional, roasting, storytelling)
 - What kind of reply would fit this specific context?
 
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
+- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
+- NEVER start with "If this happened," or "If that happened," — just state your point directly.
+
 Then write ONE reply that:
 
 - Matches the tweet's language and cultural context. If the tweet is in Pidgin, reply in Pidgin. If it's professional, be professional. If it's roasting, roast back.
@@ -647,6 +747,7 @@ A bad reply:
 - Sounds like a LinkedIn post or a news anchor.
 - Writes more than 2 sentences for casual posts.
 - Uses perfect grammar and formal structure — real Twitter replies are casual.
+- Starts with "One thing I'd add," or "One thing to add," — just state your point directly.
 
 Writing style:
 
@@ -696,13 +797,23 @@ export function buildPersonalityPrompt(
   // Check for a category-specific prompt
   const categoryPromptFn = categoryPrompts[normalized];
 
-  if (categoryPromptFn) {
-    const prompt = categoryPromptFn(tweet, analysis);
-    return prompt;
-  }
+  // Build base prompt
+  const basePrompt = categoryPromptFn
+    ? categoryPromptFn(tweet, analysis)
+    : buildGenericPrompt(tweet, relationship, normalized, memories, imageDescriptions, analysis);
 
-  // Fall back to generic prompt
-  return buildGenericPrompt(tweet, relationship, normalized, memories, imageDescriptions, analysis);
+  // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
+  // Placing it here ensures every single prompt variant gets this reinforcement.
+  const finalGuardrail = `\n\nFINAL INSTRUCTIONS — VIOLATIONS GET DELETED:
+• Do NOT start with: "One thing I'd add", "One thing to add", "If that's really what happened", "If that's true", "If this happened", or "If that happened".
+• Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
+• Your reply is an observation, not a transaction. Never invent actions.
+• Use simple, everyday words. Write like you're texting a friend — short words, short sentences.
+• No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
+• No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
+• Be plain and direct. If you wouldn't say it to a friend, don't write it.`;
+
+  return basePrompt + finalGuardrail;
 }
 
 // Export for testing

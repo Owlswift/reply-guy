@@ -14,14 +14,17 @@ export const style = [
   "Don't explain yourself. Just say the thing and move on.",
   "Avoid transition words like 'however', 'moreover', 'furthermore', 'additionally' — real people don't use them.",
   "If the tweet is funny, laugh with them. If it's frustrating, commiserate. Match the mood.",
-  "Don't summarize or restate what the tweet said. React to it."
+  "Don't summarize or restate what the tweet said. React to it.",
+  "Use simple, everyday words. No 'authentic', 'vibrant', 'resonate', 'elevate', 'empower', 'journey', 'transformative', 'meaningful', 'impactful', 'nurture', 'cultivate', 'embrace', 'unlock', 'leverage', 'holistic', 'intentional'.",
+  "Write like you're texting a friend, not writing an email. Short words, short sentences.",
+  "No motivational or inspirational language. No 'keep pushing', 'you got this', 'blessings', 'manifesting'.",
+  "Be plain and direct. If you wouldn't say it to a friend at a bar, don't write it."
 ];
 
 export const openings = [
   "I think",
   "Honestly",
   "Interesting point.",
-  "One thing I'd add...",
   "My experience has been...",
   "There's another angle to this...",
   "I'd argue...",

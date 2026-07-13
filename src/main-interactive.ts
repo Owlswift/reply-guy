@@ -18,6 +18,7 @@ import { ChatGPTClient } from "./ai/chatgpt";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
+import { generateReply as generateOllamaReply } from "./ai/generateReply";
 import chalk from "chalk";
 import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
@@ -390,20 +391,39 @@ async function main() {
             await page.waitForTimeout(microBreak);
           }
 
+          // Determine tweet type to decide which model to use
+          const tweetType = classifyTweet(tweetText);
+          
           let reply = "";
-          for (let i = 0; i < 3; i++) {
-            reply = await chatgpt.generateReply({
-              tweet: tweetText,
-              relationship: "stranger",
-              memories
-            });
-            if (validateReply(reply) && !isDuplicate(reply)) {
-              break;
+          // Use Ollama for greetings/well-wishes to save ChatGPT API calls
+          if (tweetType === "well_wish" || tweetType === "greeting") {
+            for (let i = 0; i < 3; i++) {
+              reply = await generateOllamaReply(tweetText);
+              if (validateReply(reply) && !isDuplicate(reply)) {
+                break;
+              }
+            }
+          } else {
+            // Use ChatGPT for other tweet types
+            for (let i = 0; i < 3; i++) {
+              try {
+                reply = await chatgpt.generateReply({
+                  tweet: tweetText,
+                  relationship: "stranger",
+                  memories
+                });
+                if (validateReply(reply) && !isDuplicate(reply)) {
+                  break;
+                }
+              } catch (err) {
+                log(`ChatGPT attempt ${i + 1} failed: ${err}`);
+                reply = ""; // Reset reply on error
+              }
             }
           }
 
-          if (!reply) {
-            log(`Failed to generate reply for ${item.id}. Skipping.`);
+          if (!reply || !validateReply(reply)) {
+            log(`Failed to generate valid reply for ${item.id}. Skipping.`);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -475,12 +495,8 @@ async function main() {
             }
           }
 
-          const autoDraft = await chatgpt.generateReply({
-            tweet: tweetText,
-            relationship: readyItem.relationship || "stranger",
-            memories,
-            ...(autoImageDescriptions ? { imageDescriptions: autoImageDescriptions } : {})
-          });
+          // Use Ollama for greetings to save ChatGPT API calls
+          const autoDraft = await generateOllamaReply(tweetText);
 
           if (autoDraft) {
             try {

@@ -21,6 +21,7 @@ const KEYWORDS: KeywordMap = {
     /it's (sunday|monday|tuesday|wednesday|thursday|friday|saturday)/i,
     /(sunday|monday) (morning|afternoon|evening|night)/i,
     /(blessed|grace|happy|thank).*\b(sunday|monday)\b/i,
+    /\b(god bless|bless you|amen|prayer|praying|pray for|blessings|grateful|thank god|praise god)\b/i,
   ],
   greeting: [
     /good (morning|afternoon|evening)/i,

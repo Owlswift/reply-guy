@@ -89,6 +89,34 @@ export class ChatGPTClient {
     // Read the last assistant message
     const reply = await this.readLastAssistantMessage(page);
 
+    // Validate that we got an actual response, not an error message
+    if (!reply || reply.length < 10) {
+      throw new Error("ChatGPT returned empty or too short response");
+    }
+
+    // Check for common error indicators
+    const errorPatterns = [
+      "enable javascript",
+      "enable cookies",
+      "challenge-error",
+      "verify you are human",
+      "cloudflare",
+      "access denied",
+      "error occurred"
+    ];
+
+    const lowerReply = reply.toLowerCase();
+    const hasError = errorPatterns.some(pattern => lowerReply.includes(pattern));
+
+    if (hasError) {
+      throw new Error(`ChatGPT returned error page: ${reply.substring(0, 100)}`);
+    }
+
+    // Check if reply contains HTML tags (indicates error page or malformed response)
+    if (reply.includes('<div') || reply.includes('<span') || reply.includes('<html')) {
+      throw new Error(`ChatGPT returned HTML content instead of text: ${reply.substring(0, 100)}`);
+    }
+
     return reply;
   }
 
