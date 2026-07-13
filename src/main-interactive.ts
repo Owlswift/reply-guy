@@ -311,11 +311,21 @@ async function main() {
           }
 
           // ============================================================
-          // Check if @unfairleverage has already replied manually
-          // This must happen BEFORE AI generation to avoid wasting credits.
+          // Check if @unfairleverage has already replied manually.
+          // We look for your handle link appearing inside any article
+          // after the root tweet. This avoids false matches from sidebar
+          // profile cards or "Replying to @unfairleverage" text.
           // ============================================================
-          const alreadyReplied = await page.locator('a[href="/unfairleverage"]').count();
-          if (alreadyReplied > 0) {
+          const allArticles = page.locator('article');
+          const articleCount = await allArticles.count();
+          let yourReplyCount = 0;
+          for (let a = 1; a < articleCount; a++) {
+            const linkCount = await allArticles.nth(a).locator('a[href="/unfairleverage"]').count();
+            if (linkCount > 0) {
+              yourReplyCount++;
+            }
+          }
+          if (yourReplyCount > 0) {
             log(`Already replied to ${item.id} manually. Skipping.`);
             await navigator.returnToTimeline();
             dequeue();
