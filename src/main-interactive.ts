@@ -282,10 +282,51 @@ async function main() {
 
       // Only process items that are "ready" or "pending"
       if (item.status === "pending") {
-        log(`=== PHASE: GENERATE DRAFT for ${item.id} ===`);
         updateItem(item.id, { status: "drafting" });
 
         try {
+          // ============================================================
+          // PHASE 3: OPEN NOTIFICATION TWEET (before AI generation)
+          // ============================================================
+          log(`=== PHASE: OPEN TWEET ${item.id} ===`);
+          stats.tweets++;
+
+          await navigator.openTweet(item.url);
+
+          // Skip if we can't reply
+          const replyButton = page.locator('[data-testid="reply"]').first();
+          if (!(await replyButton.isVisible().catch(() => false))) {
+            log(`Reply unavailable. Skipping.`);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          const details = await extractCurrentTweet(page);
+          if (!details) {
+            log(`Cannot extract tweet ${item.id}. Skipping.`);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // ============================================================
+          // Check if @unfairleverage has already replied manually
+          // This must happen BEFORE AI generation to avoid wasting credits.
+          // ============================================================
+          const alreadyReplied = await page.locator('a[href="/unfairleverage"]').count();
+          if (alreadyReplied > 0) {
+            log(`Already replied to ${item.id} manually. Skipping.`);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Reading time — scales with fatigue
+          const tweetText = details.fullText || details.text || item.text;
+          const readTime = getReadingTime(tweetText);
+          await page.waitForTimeout(readTime);
+
           const { MemoryRepository } = await import("./database/MemoryRepository");
           const memoryRepo = new MemoryRepository();
           const memories = await memoryRepo.getRecentMemories(20);
@@ -299,7 +340,7 @@ async function main() {
           let reply = "";
           for (let i = 0; i < 3; i++) {
             reply = await chatgpt.generateReply({
-              tweet: item.text,
+              tweet: tweetText,
               relationship: "stranger",
               memories
             });
@@ -310,6 +351,7 @@ async function main() {
 
           if (!reply) {
             log(`Failed to generate reply for ${item.id}. Skipping.`);
+            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -332,39 +374,10 @@ async function main() {
       updateItem(readyItem.id, { status: "processing" });
 
       try {
-        // ============================================================
-        // PHASE 3: OPEN NOTIFICATION TWEET
-        // ============================================================
-        log(`=== PHASE: OPEN TWEET ${readyItem.id} ===`);
-        stats.tweets++;
-
-        await navigator.openTweet(readyItem.url);
-
-        // Skip if we can't reply
-        const replyButton = page.locator('[data-testid="reply"]').first();
-        if (!(await replyButton.isVisible().catch(() => false))) {
-          log(`Reply unavailable. Skipping.`);
-          await navigator.returnToTimeline();
-          dequeue();
-          continue;
-        }
-
+        // Re-extract tweet details (the page is still open from the pending phase)
         const details = await extractCurrentTweet(page);
         if (!details) {
           log(`Cannot extract tweet ${readyItem.id}. Skipping.`);
-          await navigator.returnToTimeline();
-          dequeue();
-          continue;
-        }
-
-        // ============================================================
-        // Check if @unfairleverage has already replied manually
-        // The browser is the source of truth — the database only knows
-        // about replies Echo made, not manual replies from phone/browser.
-        // ============================================================
-        const alreadyReplied = await page.locator('a[href="/unfairleverage"]').count();
-        if (alreadyReplied > 0) {
-          log(`Already replied to ${readyItem.id} manually. Skipping.`);
           await navigator.returnToTimeline();
           dequeue();
           continue;
