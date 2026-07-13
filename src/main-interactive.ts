@@ -357,6 +357,19 @@ async function main() {
           continue;
         }
 
+        // ============================================================
+        // Check if @unfairleverage has already replied manually
+        // The browser is the source of truth — the database only knows
+        // about replies Echo made, not manual replies from phone/browser.
+        // ============================================================
+        const alreadyReplied = await page.locator('a[href="/unfairleverage"]').count();
+        if (alreadyReplied > 0) {
+          log(`Already replied to ${readyItem.id} manually. Skipping.`);
+          await navigator.returnToTimeline();
+          dequeue();
+          continue;
+        }
+
         // Reading time — scales with fatigue
         const tweetText = details.fullText || details.text || readyItem.text;
         const readTime = getReadingTime(tweetText);
