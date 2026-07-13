@@ -1,7 +1,7 @@
 import { shouldReply } from "./decision/shouldReply";
 import { TimelineTweet } from "./types/tweet";
 
-// Test 1: Verified user
+// Test 1: Verified user — fresh tweet with few replies
 const verifiedTweet: TimelineTweet = {
   id: "123",
   author: "John Doe",
@@ -11,15 +11,16 @@ const verifiedTweet: TimelineTweet = {
   verified: true,
   following: false,
   followsYou: false,
-  likes: 0,
-  replies: 0,
+  likes: 500,
+  replies: 8,
   reposts: 0,
-  source: "timeline"
+  source: "timeline",
+  createdAt: new Date()
 };
 
 console.log("Verified tweet:", shouldReply(verifiedTweet));
 
-// Test 2: Non-verified user
+// Test 2: Non-verified user — old tweet with many replies
 const strangerTweet: TimelineTweet = {
   id: "101",
   author: "Random User",
@@ -30,9 +31,10 @@ const strangerTweet: TimelineTweet = {
   following: false,
   followsYou: false,
   likes: 0,
-  replies: 0,
+  replies: 650,
   reposts: 0,
-  source: "timeline"
+  source: "timeline",
+  createdAt: new Date(Date.now() - 8 * 60_000) // 8 min old
 };
 
 console.log("Stranger tweet:", shouldReply(strangerTweet));
@@ -50,7 +52,8 @@ const spamTweet: TimelineTweet = {
   likes: 0,
   replies: 0,
   reposts: 0,
-  source: "timeline"
+  source: "timeline",
+  createdAt: new Date()
 };
 
 console.log("Spam tweet:", shouldReply(spamTweet));

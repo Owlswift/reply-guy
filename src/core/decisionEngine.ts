@@ -1,5 +1,5 @@
+// NOTE: This file is deprecated — scoring now lives in src/decision/scoreTweet.ts
 import { Relationship } from "../relationship/types";
-import { calculatePriority, Priority } from "./priorityQueue";
 
 export interface TweetScore {
   relationship: number;
@@ -57,7 +57,4 @@ export function scoreTweet(
   };
 }
 
-export function getPriority(text: string, relationship: Relationship, ageMinutes: number): Priority {
-  const score = scoreTweet(text, relationship, ageMinutes);
-  return calculatePriority(relationship, score.quality);
-}
+// getPriority removed — use src/decision/scoreTweet.ts instead

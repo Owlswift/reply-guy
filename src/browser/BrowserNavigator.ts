@@ -133,6 +133,37 @@ export class BrowserNavigator {
   }
 
   /**
+   * Go back one page in browser history using the back button.
+   * This is the preferred way to return to notifications after opening a tweet,
+   * because X.com's server redirects /i/timeline to /home if you use goto.
+   */
+  async goBack(): Promise<void> {
+    log("[Navigator] Going back in history");
+    try {
+      await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 15000 });
+    } catch {
+      log("[Navigator] goBack timed out or failed");
+    }
+
+    // Wait for articles to render
+    try {
+      await this.page.waitForLoadState("networkidle", { timeout: 10000 });
+    } catch {
+      log("[Navigator] networkidle timed out, continuing with loaded page");
+    }
+
+    try {
+      await this.page.waitForSelector("article", { timeout: 10000 });
+    } catch {
+      log("[Navigator] Articles did not appear within timeout, continuing anyway");
+    }
+
+    // Human-like pause after landing back
+    const delay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;
+    await this.page.waitForTimeout(delay);
+  }
+
+  /**
    * Go back to the i/timeline from a tweet page using browser back button
    * Only allowed when NOT in a review session (review session handles its own navigation)
    */

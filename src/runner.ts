@@ -58,7 +58,8 @@ async function run() {
       const timelineTweet = {
         ...tweet,
         verified: relationship === "verified",
-        source: "timeline" as const
+        source: "timeline" as const,
+        createdAt: new Date()
       };
 
       // Decide whether to reply

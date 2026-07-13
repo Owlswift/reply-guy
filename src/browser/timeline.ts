@@ -14,6 +14,8 @@ export interface TimelineTweet {
     likes: number;
     replies: number;
     reposts: number;
+    source?: string;
+    createdAt?: Date;
 }
 
 // Navigate to the filtered posts timeline (for reload functionality)

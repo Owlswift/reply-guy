@@ -1,6 +1,5 @@
 import { Page } from "playwright";
 import { extractTweets } from "../browser/extractTweets";
-import { markNotificationSeen, isNotificationSeen } from "../storage/seenNotifications";
 import { BrowserNavigator } from "../browser/BrowserNavigator";
 
 export class NotificationFeedSource {
@@ -20,25 +19,22 @@ export class NotificationFeedSource {
 
         const tweets = await extractTweets(page, "notifications");
         
-        // Filter out already processed tweets using persistent storage
-        return tweets.filter(tweet => !isNotificationSeen(tweet.id));
-    }
-
-    markProcessed(tweetId: string, tweetUrl: string): void {
-        markNotificationSeen(tweetId, tweetUrl);
-    }
-
-    isProcessed(tweetId: string): boolean {
-        return isNotificationSeen(tweetId);
+        // Return ALL notifications from the feed.
+        // The main loop handles deduplication by checking the queue and
+        // replied-tweets storage. We don't filter here because a tweet
+        // may have been enqueued but skipped (e.g. shouldSkipTweet),
+        // and we want to give it another chance if it's still visible.
+        return tweets;
     }
 
     async returnToPostsFeed(navigator: BrowserNavigator): Promise<void> {
-        // Navigate directly to the filtered posts timeline
+        // Use browser back button to return to notifications.
+        // Since we opened a tweet from the notifications page, goBack()
+        // returns us to exactly where we were — no server-side redirect.
         try {
-            await navigator.navigateToTimeline();
-            // Note: Cannot wait for selector here as we don't have page access
+            await navigator.goBack();
         } catch {
-            // If navigation fails, we may need to reopen
+            // If back fails, we may need to reopen
             this.isActive = false;
         }
     }

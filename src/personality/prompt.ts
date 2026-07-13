@@ -8,6 +8,23 @@ import { ReplyMemory } from "../types/memory";
 
 type CategoryPrompts = Record<string, (tweet: string, analysis?: TweetAnalysis) => string>;
 
+// ─── Shared style reference from past approved replies ───────────────────────
+
+function styleReference(memories: ReplyMemory[]): string {
+  const approved = memories
+    .filter(m => m.approved && m.finalReply && m.finalReply.length > 0)
+    .slice(0, 8);
+
+  if (approved.length === 0) return "";
+
+  return `
+
+My writing style (from replies I approved):
+${approved.map(m => `- "${m.finalReply}"`).join("\n")}
+
+Match this tone, vocabulary, and personality. Write exactly the way I would.`;
+}
+
 // ─── Category-specific reply strategies ───────────────────────────────────────
 
 const categoryPrompts: CategoryPrompts = {
@@ -585,6 +602,9 @@ ${m.finalReply}
 `)
     .join("\n");
 
+  // Style reference from approved replies
+  const styleRef = styleReference(memories);
+
   return `
 You are writing replies exactly as I would.
 
@@ -592,19 +612,26 @@ ${imageContext}
 
 ${analysisContext}
 
-First, silently determine:
+First, silently analyze the tweet's context:
 
-- What is the tweet actually about?
-- Is it serious, funny, sarcastic, inspirational or controversial?
-- What kind of reply would people actually enjoy reading?
+- What language and dialect is the tweet written in? (e.g. Nigerian Pidgin, American English, British English, Yoruba, etc.)
+- What cultural references does it use? (e.g. Naija slang, US politics, football banter, tech Twitter, etc.)
+- What is the author's tone? (e.g. casual, angry, joking, professional, roasting, storytelling)
+- What kind of reply would fit this specific context?
 
-Then write a reply that does ONE of these:
+Then write ONE reply that:
 
-- Add a new perspective.
-- Make a witty observation.
-- Expand on the idea.
-- Make people smile.
-- React as if a friend told you this.
+- Matches the tweet's language and cultural context. If the tweet is in Pidgin, reply in Pidgin. If it's professional, be professional. If it's roasting, roast back.
+- Reacts as if a friend told you this.
+- Sounds like a real person on that side of Twitter, not a generic bot.
+- Uses contractions (I'll, don't, it's, that's, won't) — real people don't type like a formal essay.
+- Reacts emotionally when appropriate: be amused, skeptical, impressed, dismissive, or playfully disagree.
+- Uses sentence fragments if it sounds natural. Perfect grammar sounds robotic.
+
+**Length depends on the tweet type:**
+- For casual posts, jokes, memes, greetings, short opinions → keep it to 1 sentence, 5-10 words. No essays.
+- For politics, news, stories, advice → 1-2 sentences is fine. Add a real take.
+- For anything you're unsure about → keep it short. Shorter is always safer.
 
 A bad reply:
 
@@ -613,6 +640,13 @@ A bad reply:
 - Gives generic motivation.
 - Sounds like ChatGPT.
 - States the obvious.
+- Uses the wrong dialect or tone for the context.
+- Uses transition words like "however", "moreover", "furthermore", "additionally".
+- Summarizes or restates what the tweet said instead of reacting to it.
+- Explains itself or adds disclaimers like "in my opinion", "I think", "from my perspective".
+- Sounds like a LinkedIn post or a news anchor.
+- Writes more than 2 sentences for casual posts.
+- Uses perfect grammar and formal structure — real Twitter replies are casual.
 
 Writing style:
 
@@ -630,9 +664,11 @@ ${type}
 
 -------------------------
 
-Previous replies I approved
+Previous replies I approved (study how I adapt to different contexts)
 
 ${examples}
+
+${styleRef}
 
 -------------------------
 
@@ -640,7 +676,7 @@ Current Tweet
 
 ${tweet}
 
-Write ONE reply that another human would actually like.
+Write ONE reply that matches this tweet's context and sounds like me.
 `;
 }
 

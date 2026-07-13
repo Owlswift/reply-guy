@@ -21,4 +21,5 @@ export interface TimelineTweet {
   replies: number;
   reposts: number;
   source: TweetSourceType;
+  createdAt: Date;
 }

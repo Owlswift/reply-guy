@@ -4,7 +4,8 @@ import { extractCurrentTweet } from "../browser/extractTweet";
 import { backToTimeline } from "../reply/backToTimeline";
 import { scrollTimeline } from "../browser/scroll";
 import { readDelay, betweenRepliesDelay, maybeDistractedPause } from "../behavior/profiles";
-import { shouldTakeBreak, getBreakDuration } from "../behavior/scheduler";
+// These are no longer exported from scheduler — kept for reference
+// import { shouldTakeBreak, getBreakDuration } from "../behavior/scheduler";
 import { markReplied } from "../storage/repliedTweets";
 import { markNotificationReplied, getNotificationProgress } from "../storage/seenNotifications";
 import { log } from "../utils/logger";
@@ -97,11 +98,12 @@ export async function runBrowserWorker(page: Page, navigator: BrowserNavigator):
         console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
 
         // Longer pause after several replies (human-like break)
-        if (shouldTakeBreak(stats.posted)) {
-          const breakMs = getBreakDuration();
-          log(`Taking a longer break (${(breakMs / 60000).toFixed(0)} min)...`);
-          await page.waitForTimeout(breakMs);
-        }
+        // Commented out — replaced by session-based scheduler in main-interactive.ts
+        // if (shouldTakeBreak(stats.posted)) {
+        //   const breakMs = getBreakDuration();
+        //   log(`Taking a longer break (${(breakMs / 60000).toFixed(0)} min)...`);
+        //   await page.waitForTimeout(breakMs);
+        // }
       } else if (result.status === "skipped") {
         // Remove from queue without replying
         dequeue();

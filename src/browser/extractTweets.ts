@@ -78,6 +78,11 @@ export async function extractTweets(
             const verifiedBadge = article.querySelector('[data-testid="icon-verified"]');
             const verified = !!verifiedBadge;
 
+            // Extract timestamp
+            const timeElement = article.querySelector("time");
+            const datetime = timeElement?.getAttribute("datetime") ?? "";
+            const createdAt = datetime ? new Date(datetime) : new Date();
+
             return {
                 id: match?.[1] ?? "",
                 author,
@@ -92,7 +97,8 @@ export async function extractTweets(
                 likes,
                 replies,
                 reposts,
-                source
+                source,
+                createdAt
             };
         });
     }, source);
