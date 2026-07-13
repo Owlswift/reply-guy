@@ -14,14 +14,14 @@ export class NotificationFeedSource {
     /**
      * Fetch notifications from the feed.
      * 
-     * If incremental is true (default), only returns tweets that are
-     * newer than the newest tweet we've already seen. This avoids
-     * reprocessing old tweets every time we return from a reply.
+     * When incremental is true, only returns tweets that are newer than
+     * the newest tweet we've already seen. This is used for the quick
+     * "check for new notifications between replies" phase (PHASE 5).
      * 
-     * On the first call (no newestTweetId), returns everything and
-     * records the newest ID.
+     * When incremental is false (default), returns ALL visible tweets.
+     * This is the normal mode for the main watch loop (PHASE 1).
      */
-    async getTweets(page: Page, navigator: BrowserNavigator, incremental: boolean = true): Promise<TimelineTweet[]> {
+    async getTweets(page: Page, navigator: BrowserNavigator, incremental: boolean = false): Promise<TimelineTweet[]> {
         if (!this.isActive) {
             const opened = await navigator.openNotificationFeed();
             if (!opened) {
@@ -32,9 +32,8 @@ export class NotificationFeedSource {
 
         const tweets = await extractTweets(page, "notifications");
 
-        if (!incremental || tweets.length === 0) {
-            // First call or no tweets — record the newest ID and return all
-            this.recordNewest(tweets);
+        if (!incremental) {
+            // Normal mode: return all visible tweets
             return tweets;
         }
 

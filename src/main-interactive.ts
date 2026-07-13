@@ -14,6 +14,7 @@ import { extractCurrentTweet } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { stats } from "./stats/runtime";
+import { getNewestTweetId, setNewestTweetId, setScrollY, getScrollY } from "./timeline/state";
 import { ChatGPTClient } from "./ai/chatgpt";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
@@ -301,6 +302,10 @@ async function main() {
             dequeue();
             continue;
           }
+
+          // Save scroll position before opening tweet
+          const currentScrollY = await page.evaluate(() => window.scrollY);
+          setScrollY(currentScrollY);
 
           await navigator.openTweet(item.url);
 
@@ -597,6 +602,13 @@ async function main() {
         log(`=== PHASE: RETURN TO NOTIFICATIONS ===`);
         await notificationSource.returnToPostsFeed(navigator);
 
+        // Restore scroll position after returning
+        const savedScrollY = getScrollY();
+        if (savedScrollY > 0) {
+          await page.evaluate((y) => window.scrollTo(0, y), savedScrollY);
+          log(`Restored scroll position to ${savedScrollY}px`);
+        }
+
         // Post-reply pause — scales with fatigue
         const postPause = getPostReplyPause();
         if (postPause > 0) {
@@ -620,7 +632,7 @@ async function main() {
             break;
           }
           console.log("  → Checking for new notifications...");
-          const freshTweets = await notificationSource.getTweets(page, navigator);
+          const freshTweets = await notificationSource.getTweets(page, navigator, true);
           if (freshTweets.length > 0) {
             const replyRatio2 = getReplyRatio();
             for (const ft of freshTweets) {
