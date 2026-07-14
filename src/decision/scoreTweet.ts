@@ -12,7 +12,6 @@ const PRIORITY_HANDLES: string[] = [
   "@KAHALA123Y",
   "@AlexHormozi",
   "@piersmorgan",
-  "@sama",
   "@wak2433",
   "@unkonfined",
   "@Anathenumberone"
@@ -24,8 +23,9 @@ const PRIORITY_BONUS = 30; // flat score boost for priority handles
  * Urgent handles — tweets from these authors are treated with maximum priority.
  * They bypass age/reply skips, spam filters, and score thresholds.
  * The massive bonus ensures they always rank at the top of the queue.
- */
+*/
 const URGENT_HANDLES: string[] = [
+  "@sama",
   "@WatcherGuru"
 ];
 
