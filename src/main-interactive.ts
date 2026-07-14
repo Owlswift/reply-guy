@@ -24,23 +24,12 @@ import chalk from "chalk";
 import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
 import {
-  initScheduler,
-  isInSession,
-  didSessionEnd,
-  advanceSession,
-  isLastSession,
-  getBreakBetweenSessions,
-  getNextSessionTime,
-  getSessionName,
-  getCurrentPlan,
-  getCurrentSessionIndex,
   getReadingTime,
   getMicroBreak,
   getThinkingTime,
   getPostReplyPause,
   maybeInterruption,
   getReplyRatio,
-  forceStartSession,
 } from "./behavior/scheduler";
 
 const DAILY_LIMIT = 300;
@@ -74,53 +63,8 @@ async function main() {
   await chatgpt.init();
   log("ChatGPT client ready");
 
-  // Initialize daily scheduler
-  initScheduler();
-
   // The single source — notifications only
   const notificationSource = new NotificationFeedSource();
-
-  // Wait until the first session time, or ask to override if all passed
-  if (!isInSession()) {
-    // Check if the current session already ended — advance past it
-    let plan = getCurrentPlan();
-    let idx = getCurrentSessionIndex();
-    while (!isInSession() && plan && idx < plan.sessions.length) {
-      const session = plan.sessions[idx]!;
-      const now = new Date();
-      const currentHour = now.getHours() + now.getMinutes() / 60;
-      if (currentHour >= session.endAt) {
-        // This session already ended — advance to next
-        if (!advanceSession()) {
-          log("All scheduled sessions have passed.");
-          const { confirmPost } = await import("./cli/confirm");
-          const override = await confirmPost("All sessions have passed. Start a session now?");
-          if (override) {
-            forceStartSession();
-            break;
-          } else {
-            log("Exiting. Run again when you want to start.");
-            await chatgpt.close();
-            process.exit(0);
-          }
-        }
-        plan = getCurrentPlan();
-        idx = getCurrentSessionIndex();
-        continue;
-      }
-      // Session hasn't started yet — ask to override
-      const nextSession = getNextSessionTime();
-      log(`Waiting for next session... (next: ${nextSession})`);
-      const { confirmPost } = await import("./cli/confirm");
-      const override = await confirmPost(`Next session at ${nextSession}. Start a session now?`);
-      if (override) {
-        forceStartSession();
-        break;
-      }
-      await page.waitForTimeout(60_000);
-    }
-    log(`Session started: ${getSessionName()}`);
-  }
 
   // Navigate to notifications on startup
   log("Navigating to notifications...");
@@ -128,47 +72,9 @@ async function main() {
 
   while (stats.posted < DAILY_LIMIT) {
     // ============================================================
-    // Check if current session is over
-    // ============================================================
-    if (!isInSession()) {
-      log(`Session ended: ${getSessionName()}`);
-
-      if (isLastSession()) {
-        log("All sessions for today complete. Done.");
-        break;
-      }
-
-      const nextName = advanceSession()
-        ? getSessionName()
-        : "None";
-      log(`Next session: ${nextName} at ${getNextSessionTime()}`);
-
-      const breakMs = getBreakBetweenSessions();
-      if (breakMs > 0) {
-        const breakMin = (breakMs / 60000).toFixed(0);
-        log(`Break between sessions: ${breakMin} min...`);
-        console.log(`\n⏳ Break — next session at ${getNextSessionTime()} (${breakMin} min)\n`);
-
-        if (breakMs > 30 * 60_000) {
-          log(`Long break — quitting. Restart me when it's time.`);
-          console.log(`\n🛑 Echo paused until ${getNextSessionTime()}. Run again to continue.\n`);
-          await chatgpt.close();
-          process.exit(0);
-        }
-
-        await page.waitForTimeout(breakMs);
-      }
-
-      while (!isInSession()) {
-        await page.waitForTimeout(60_000);
-      }
-      log(`Session started: ${getSessionName()}`);
-    }
-
-    // ============================================================
     // PHASE 1: WATCH NOTIFICATIONS
     // ============================================================
-    log(`=== PHASE: WATCH NOTIFICATIONS (${getSessionName()}) ===`);
+    log("=== PHASE: WATCH NOTIFICATIONS ===");
 
     try {
       // Check if still logged in
@@ -280,10 +186,6 @@ async function main() {
     while (queueSize() > 0 && stats.posted < DAILY_LIMIT) {
       const item = peek();
       if (!item) break;
-
-      if (!isInSession()) {
-        break;
-      }
 
       // Only process items that are "ready" or "pending"
       if (item.status === "pending") {
@@ -539,11 +441,6 @@ async function main() {
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
           console.log(`\n✅ ${autoLabel} reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
-
-          if (didSessionEnd()) {
-            log("Session reply limit reached.");
-            break;
-          }
         } else {
           // ============================================================
           // PHASE 4b: AUTO-POST (ChatGPT draft)
@@ -591,11 +488,6 @@ async function main() {
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
           console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
-
-          if (didSessionEnd()) {
-            log("Session reply limit reached.");
-            break;
-          }
         }
 
         // ============================================================
