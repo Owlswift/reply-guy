@@ -23,6 +23,9 @@ import { generateReply as generateOllamaReply } from "./ai/generateReply";
 import chalk from "chalk";
 import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
+import { playNotificationSound } from "./utils/notify";
+import { promptImageDecision } from "./cli/promptImageDecision";
+import readlineSync from "readline-sync";
 import {
   getReadingTime,
   getMicroBreak,
@@ -52,6 +55,24 @@ const DAILY_LIMIT = 300;
  * Every notification is a high-quality opportunity because it passed
  * your own follow filter.
  */
+
+/**
+ * Detect whether @unfairleverage has already replied in the open thread.
+ * Looks for your handle link inside any article after the root tweet, to
+ * avoid false matches from sidebar profile cards or "Replying to" text.
+ */
+async function hasManualReply(page: Awaited<ReturnType<typeof getPage>>): Promise<boolean> {
+  const allArticles = page.locator('article');
+  const articleCount = await allArticles.count();
+  for (let a = 1; a < articleCount; a++) {
+    const linkCount = await allArticles.nth(a).locator('a[href="/unfairleverage"]').count();
+    if (linkCount > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function main() {
   const page = await getPage();
   const navigator = createNavigator(page);
@@ -228,22 +249,8 @@ async function main() {
             continue;
           }
 
-          // ============================================================
           // Check if @unfairleverage has already replied manually.
-          // We look for your handle link appearing inside any article
-          // after the root tweet. This avoids false matches from sidebar
-          // profile cards or "Replying to @unfairleverage" text.
-          // ============================================================
-          const allArticles = page.locator('article');
-          const articleCount = await allArticles.count();
-          let yourReplyCount = 0;
-          for (let a = 1; a < articleCount; a++) {
-            const linkCount = await allArticles.nth(a).locator('a[href="/unfairleverage"]').count();
-            if (linkCount > 0) {
-              yourReplyCount++;
-            }
-          }
-          if (yourReplyCount > 0) {
+          if (await hasManualReply(page)) {
             log(`Already replied to ${item.id} manually. Skipping.`);
             // Mark as replied in the database to prevent future checks
             markNotificationReplied(item.id);
@@ -281,6 +288,81 @@ async function main() {
             await navigator.returnToTimeline();
             dequeue();
             continue;
+          }
+
+          // ============================================================
+          // Image gate — pause and ask before letting AI touch a tweet
+          // that has an image, since images carry context an LLM can miss.
+          // ============================================================
+          if (details.imageUrls && details.imageUrls.length > 0) {
+            log(`=== TWEET ${item.id} HAS IMAGE(S) — PAUSING FOR REVIEW ===`);
+            playNotificationSound();
+
+            const decision = await promptImageDecision(
+              details.handle || item.author,
+              details.fullText || details.text || item.text,
+              details.imageUrls.length
+            );
+
+            if (decision === "myself") {
+              const manualReply = readlineSync.question(
+                chalk.cyan("\nType your reply and press Enter to post it (leave blank if you'd rather type it directly in the browser): ")
+              ).trim();
+
+              if (manualReply) {
+                // Post what was typed at the prompt, same path the automated flows use
+                const { prepareReply, clickReply } = await import("./reply/reply");
+                try {
+                  await prepareReply(page, manualReply);
+                  const success = await clickReply(page, details.handle || item.author);
+                  if (success) {
+                    markReplied(item.id);
+                    markNotificationReplied(item.id);
+                    stats.posted++;
+                    try {
+                      const { MemoryRepository } = await import("./database/MemoryRepository");
+                      const memoryRepo = new MemoryRepository();
+                      await memoryRepo.saveMemory({
+                        id: "",
+                        tweetId: item.id,
+                        tweetText: details.fullText || details.text || item.text,
+                        authorHandle: details.handle || item.author,
+                        relationship: item.relationship || "stranger",
+                        aiDraft: "manual",
+                        finalReply: manualReply,
+                        wasEdited: false,
+                        approved: true,
+                        createdAt: new Date()
+                      });
+                    } catch {}
+                    log(`Manual reply posted for ${item.id}.`);
+                  } else {
+                    log(`Failed to post manual reply for ${item.id}.`);
+                  }
+                } catch (err) {
+                  console.error(`Failed to post manual reply for ${item.id}:`, err);
+                }
+              } else {
+                // No text typed — assume they'll reply directly in the browser UI
+                console.log(chalk.cyan("Reply to it directly in the browser now."));
+                readlineSync.question(chalk.cyan("Press Enter once you've replied (or to skip)...\n"));
+
+                if (await hasManualReply(page)) {
+                  log(`Manual reply detected for ${item.id}.`);
+                  markReplied(item.id);
+                  markNotificationReplied(item.id);
+                  stats.posted++;
+                } else {
+                  log(`No manual reply detected for ${item.id}. Skipping.`);
+                }
+              }
+
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
+
+            log(`Passing image tweet ${item.id} to ChatGPT for an automated reply.`);
           }
 
           // Reading time — scales with fatigue
