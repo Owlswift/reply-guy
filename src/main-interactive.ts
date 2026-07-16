@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { getPage } from "./browser/browser";
-import { log } from "./utils/logger";
+import { log, msSinceLastLog } from "./utils/logger";
 import { shouldRefreshSession, markSessionRefreshed } from "./utils/session";
 import { isLoggedIn } from "./browser/isLoggedIn";
 import { enqueue, queueSize, getQueue, QueueItem, peek, dequeue, updateItem, reRankQueue, clearQueue } from "./core/queue";
@@ -25,6 +25,7 @@ import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
 import { playNotificationSound } from "./utils/notify";
 import { promptImageDecision } from "./cli/promptImageDecision";
+import { alwaysSendToChatGPT } from "./decision/posterProfiles";
 import readlineSync from "readline-sync";
 import {
   getReadingTime,
@@ -36,6 +37,37 @@ import {
 } from "./behavior/scheduler";
 
 const DAILY_LIMIT = 300;
+
+/**
+ * Watchdog — Playwright calls against a hung browser tab/CDP connection can
+ * sit forever without throwing, so a hang produces total silence rather than
+ * an error. We treat "no log() activity for too long" as a hang signal and
+ * hard-exit so an external supervisor (see scripts/watch-and-restart.sh) can
+ * restart the process with a fresh CDP connection.
+ */
+const WATCHDOG_CHECK_INTERVAL_MS = 15_000;
+const WATCHDOG_HANG_THRESHOLD_MS = 3 * 60 * 1000; // 3 min — comfortably above the ~2 min worst-case legitimate silent gap (ChatGPT generation wait)
+
+function startWatchdog(): NodeJS.Timeout {
+  const timer = setInterval(() => {
+    const silence = msSinceLastLog();
+    if (silence > WATCHDOG_HANG_THRESHOLD_MS) {
+      console.error(
+        `\n[Watchdog] No activity for ${Math.round(silence / 1000)}s — the browser/CDP connection is likely hung. Exiting so a supervisor can restart the process.\n`
+      );
+      process.exit(1);
+    }
+  }, WATCHDOG_CHECK_INTERVAL_MS);
+  timer.unref();
+  return timer;
+}
+
+/**
+ * When true, tweets with images are skipped automatically instead of
+ * pausing for manual review — lets the bot run fully unattended.
+ * Set SKIP_IMAGE_TWEETS=true in .env to enable.
+ */
+const SKIP_IMAGE_TWEETS = process.env.SKIP_IMAGE_TWEETS === "true";
 
 /**
  * Notification-centric Echo.
@@ -74,6 +106,7 @@ async function hasManualReply(page: Awaited<ReturnType<typeof getPage>>): Promis
 }
 
 async function main() {
+  const watchdog = startWatchdog();
   const page = await getPage();
   const navigator = createNavigator(page);
 
@@ -293,8 +326,28 @@ async function main() {
           // ============================================================
           // Image gate — pause and ask before letting AI touch a tweet
           // that has an image, since images carry context an LLM can miss.
+          // SKIP_IMAGE_TWEETS auto-skips any image tweet (the text-length
+          // exception is commented out below).
+          // Poster overrides (see posterProfiles.ts) bypass this gate
+          // entirely — always straight to ChatGPT, image or no image.
           // ============================================================
-          if (details.imageUrls && details.imageUrls.length > 0) {
+          const posterHandle = details.handle || item.author;
+          const hasImages = Boolean(details.imageUrls && details.imageUrls.length > 0);
+          const isOverridePoster = alwaysSendToChatGPT(posterHandle);
+
+          if (hasImages && isOverridePoster) {
+            log(`Tweet ${item.id} from ${posterHandle} has image(s) — poster override, sending straight to ChatGPT.`);
+          }
+
+          if (hasImages && !isOverridePoster) {
+            // const tweetContext = details.fullText || details.text || item.text || "";
+            if (SKIP_IMAGE_TWEETS /* && tweetContext.length <= 30 */) {
+              log(`Tweet ${item.id} has image(s) — SKIP_IMAGE_TWEETS is on, skipping.`);
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
+
             log(`=== TWEET ${item.id} HAS IMAGE(S) — PAUSING FOR REVIEW ===`);
             playNotificationSound();
 
@@ -634,6 +687,7 @@ async function main() {
     }
   }
 
+  clearInterval(watchdog);
   log(`Completed ${stats.posted} replies today.`);
   await chatgpt.close();
 }

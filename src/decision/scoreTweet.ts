@@ -10,11 +10,12 @@ const PRIORITY_HANDLES: string[] = [
   "@EricLDaugh",
   "@Read_Meee",
   "@KAHALA123Y",
-  "@AlexHormozi",
-  "@piersmorgan",
   "@wak2433",
-  "@unkonfined",
-  "@Anathenumberone"
+  "@KINGGGE_",
+  "@Anathenumberone",
+  "@theladymotara",
+  "@ok6ixx",
+  "@bluewdrift"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -26,10 +27,29 @@ const PRIORITY_BONUS = 30; // flat score boost for priority handles
 */
 const URGENT_HANDLES: string[] = [
   "@sama",
-  "@WatcherGuru"
+  "@WatcherGuru",
+  "@Sassafrass_84",
+  "@PlanetOfMemes",
+  "@QueenAnticommie",
+  "@GuntherEagleman",
+  "@badger69420",
+  "piersmorgan",
+  "unkonfined",
+  "AlexHormozi",
 ];
 
 const URGENT_BONUS = 1000; // massive score boost for urgent handles
+
+/**
+ * Top-priority handle — takes precedence over every other handle,
+ * including other urgent handles. Always sorts first in the queue.
+ */
+const TOP_PRIORITY_HANDLES: string[] = [
+  "@realmfpriya",
+  "@kemi_adeleke1"
+];
+
+const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
 
 /**
  * Compute how visible a new reply on this tweet is likely to be.
@@ -121,6 +141,9 @@ function topicScore(_text: string): number {
 export function isUrgent(author: string, username: string): boolean {
   const normalized = author.replace(/^@/, "").toLowerCase();
   const normalizedUser = username.toLowerCase();
+  // Top-priority handles inherit all urgent-handle behavior (spam/age bypass)
+  // in addition to outranking every other handle in score.
+  if (isTopPriority(author, username)) return true;
   return URGENT_HANDLES.some(
     h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
   );
@@ -144,6 +167,24 @@ function urgentBonus(author: string, username: string): number {
   return isUrgent(author, username) ? URGENT_BONUS : 0;
 }
 
+/**
+ * Check if the author is the top-priority handle.
+ */
+export function isTopPriority(author: string, username: string): boolean {
+  const normalized = author.replace(/^@/, "").toLowerCase();
+  const normalizedUser = username.toLowerCase();
+  return TOP_PRIORITY_HANDLES.some(
+    h => normalized === h.replace(/^@/, "").toLowerCase() || normalizedUser === h.replace(/^@/, "").toLowerCase()
+  );
+}
+
+/**
+ * Check if the author is the top-priority handle and return its bonus.
+ */
+function topPriorityBonus(author: string, username: string): number {
+  return isTopPriority(author, username) ? TOP_PRIORITY_BONUS : 0;
+}
+
 export function scoreTweet(tweet: TimelineTweet): number {
   const now = Date.now();
   const ageMs = now - tweet.createdAt.getTime();
@@ -156,8 +197,9 @@ export function scoreTweet(tweet: TimelineTweet): number {
   const tScore  = topicScore(tweet.text);
   const pBonus  = priorityBonus(tweet.author, tweet.username);
   const uBonus  = urgentBonus(tweet.author, tweet.username);
+  const tpBonus = topPriorityBonus(tweet.author, tweet.username);
 
-  // Weighted sum + priority bonus + urgent bonus
+  // Weighted sum + priority bonus + urgent bonus + top-priority bonus
   const total =
     aScore  * 0.45 +
     rScore  * 0.30 +
@@ -165,7 +207,8 @@ export function scoreTweet(tweet: TimelineTweet): number {
     relScore * 0.05 +
     tScore  * 0.10 +
     pBonus +
-    uBonus;
+    uBonus +
+    tpBonus;
 
   // Round to integer
   return Math.round(total);

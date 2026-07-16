@@ -147,6 +147,20 @@ export class BrowserNavigator {
       log("[Navigator] networkidle timed out, continuing with loaded page");
     }
 
+    // page.goBack() can resolve without throwing even when there's no
+    // history entry to go back to (or X's SPA history is out of sync with
+    // a real navigation) — it silently no-ops and leaves the page wherever
+    // it already was. Verify we actually landed on a feed page and force
+    // a direct navigation if not, otherwise every caller downstream would
+    // loop forever thinking there's simply nothing new to find.
+    if (!this.isOnFeedPage()) {
+      log(`[Navigator] goBack landed on unexpected page (${this.page.url()}) — forcing navigation to notifications`);
+      await this.page.goto("https://x.com/notifications", {
+        waitUntil: "domcontentloaded",
+        timeout: 15000
+      }).catch(() => {});
+    }
+
     try {
       await this.page.waitForSelector("article", { timeout: 10000 });
     } catch {
@@ -191,6 +205,15 @@ export class BrowserNavigator {
       log("[Navigator] networkidle timed out, continuing with loaded page");
     }
 
+    // Same silent-no-op risk as goBack() above — verify and self-correct.
+    if (!this.isOnFeedPage()) {
+      log(`[Navigator] returnToTimeline landed on unexpected page (${this.page.url()}) — forcing navigation to i/timeline`);
+      await this.page.goto("https://x.com/i/timeline", {
+        waitUntil: "domcontentloaded",
+        timeout: 15000
+      }).catch(() => {});
+    }
+
     // Wait for articles to render
     try {
       await this.page.waitForSelector("article", { timeout: 10000 });
@@ -201,6 +224,16 @@ export class BrowserNavigator {
     // Human-like pause after landing back on the feed
     const delay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;
     await this.page.waitForTimeout(delay);
+  }
+
+  /**
+   * Whether the current page is a recognized feed page (timeline, home, or
+   * notifications) as opposed to a stray tweet/conversation page or
+   * something goBack() left us on unexpectedly.
+   */
+  private isOnFeedPage(): boolean {
+    const url = this.page.url();
+    return url.includes("/i/timeline") || url.includes("/home") || url.includes("/notifications");
   }
 
   /**
