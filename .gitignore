@@ -16,3 +16,4 @@ echo.db-shm
 echo.db-wal
 repliedTweets.json
 replies.log
+logs/
