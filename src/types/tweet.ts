@@ -22,4 +22,5 @@ export interface TimelineTweet {
   reposts: number;
   source: TweetSourceType;
   createdAt: Date;
+  hasImage?: boolean;
 }

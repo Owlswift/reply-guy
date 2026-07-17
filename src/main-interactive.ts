@@ -8,7 +8,7 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority } from "./decision/scoreTweet";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
@@ -23,9 +23,10 @@ import { generateReply as generateOllamaReply } from "./ai/generateReply";
 import chalk from "chalk";
 import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
-import { playNotificationSound } from "./utils/notify";
-import { promptImageDecision } from "./cli/promptImageDecision";
+import { startNotificationLoop } from "./utils/notify";
+import { promptImageDecision, ImageDecision } from "./cli/promptImageDecision";
 import { alwaysSendToChatGPT } from "./decision/posterProfiles";
+import { markSkippedForImage, wasSkippedForImage } from "./storage/skippedImageTweets";
 import readlineSync from "readline-sync";
 import {
   getReadingTime,
@@ -131,6 +132,15 @@ async function main() {
     log("=== PHASE: WATCH NOTIFICATIONS ===");
 
     try {
+      // page.evaluate()/locators never throw a distinct error for "the tab
+      // got closed" — isLoggedIn() swallows all errors and just returns
+      // false, so without this check a crashed/closed tab is misreported
+      // as "Session expired" when the real cause is the browser losing the tab.
+      if (page.isClosed()) {
+        log("Browser tab was closed or crashed. Stopping bot.");
+        break;
+      }
+
       // Check if still logged in
       if (!(await isLoggedIn(page))) {
         log("Session expired. Stopping bot.");
@@ -192,6 +202,23 @@ async function main() {
           continue;
         }
 
+        // Image tweets are detectable from the timeline card itself — skip
+        // enqueueing (and thus opening) them entirely instead of paying for
+        // a full open→detect→goBack cycle, mirroring the SKIP_IMAGE_TWEETS
+        // gate that used to only run after the tweet was already open.
+        // Top-priority handles (scoreTweet.ts) are exempt — their image
+        // tweets always get opened for manual review, never skipped.
+        if (
+          SKIP_IMAGE_TWEETS &&
+          tweet.hasImage &&
+          !alwaysSendToChatGPT(tweet.username) &&
+          !isTopPriority(tweet.author, tweet.username)
+        ) {
+          log(`Tweet ${tweet.id} has image(s) (detected pre-open) — SKIP_IMAGE_TWEETS is on, skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
         if (Math.random() > replyRatio) {
           continue;
         }
@@ -237,7 +264,7 @@ async function main() {
     // ============================================================
     // PHASE 2: PROCESS QUEUE — reply to highest-priority first
     // ============================================================
-    while (queueSize() > 0 && stats.posted < DAILY_LIMIT) {
+    while (queueSize() > 0 && stats.posted < DAILY_LIMIT && !page.isClosed()) {
       const item = peek();
       if (!item) break;
 
@@ -259,6 +286,28 @@ async function main() {
             continue;
           }
 
+          // Check Redis BEFORE opening the tweet — if we already know this
+          // URL has image(s) and was skipped before, don't waste a navigation
+          // on it again. Poster overrides and top-priority handles still get
+          // opened regardless.
+          // Fails open (treated as "not previously skipped") if Redis is
+          // unreachable, so a Redis outage degrades to pre-Redis behavior
+          // instead of every tweet erroring out and getting dropped.
+          let previouslySkippedForImage = false;
+          if (!alwaysSendToChatGPT(item.author) && !isTopPriority(item.author, item.author)) {
+            try {
+              previouslySkippedForImage = await wasSkippedForImage(item.url);
+            } catch (err) {
+              log(`Redis check failed for ${item.id}, proceeding anyway: ${err}`);
+            }
+          }
+          if (previouslySkippedForImage) {
+            log(`Tweet ${item.id} previously skipped for image(s) — not opening.`);
+            markReplied(item.id);
+            dequeue();
+            continue;
+          }
+
           // Save scroll position before opening tweet
           const currentScrollY = await page.evaluate(() => window.scrollY);
           setScrollY(currentScrollY);
@@ -269,6 +318,7 @@ async function main() {
           const replyButton = page.locator('[data-testid="reply"]').first();
           if (!(await replyButton.isVisible().catch(() => false))) {
             log(`Reply unavailable. Skipping.`);
+            markReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -277,6 +327,7 @@ async function main() {
           const details = await extractCurrentTweet(page);
           if (!details) {
             log(`Cannot extract tweet ${item.id}. Skipping.`);
+            markReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -287,6 +338,7 @@ async function main() {
             log(`Already replied to ${item.id} manually. Skipping.`);
             // Mark as replied in the database to prevent future checks
             markNotificationReplied(item.id);
+            markReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -318,6 +370,7 @@ async function main() {
           }) as boolean;
           if (!canReply) {
             log(`Cannot reply to ${item.id} — replies are restricted. Skipping.`);
+            markReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -330,10 +383,14 @@ async function main() {
           // exception is commented out below).
           // Poster overrides (see posterProfiles.ts) bypass this gate
           // entirely — always straight to ChatGPT, image or no image.
+          // Top-priority handles (scoreTweet.ts) take precedence over both:
+          // their image tweets always pause for manual review, never
+          // auto-skipped and never auto-sent to ChatGPT.
           // ============================================================
           const posterHandle = details.handle || item.author;
           const hasImages = Boolean(details.imageUrls && details.imageUrls.length > 0);
-          const isOverridePoster = alwaysSendToChatGPT(posterHandle);
+          const isTopPriorityPoster = isTopPriority(posterHandle, posterHandle);
+          const isOverridePoster = !isTopPriorityPoster && alwaysSendToChatGPT(posterHandle);
 
           if (hasImages && isOverridePoster) {
             log(`Tweet ${item.id} from ${posterHandle} has image(s) — poster override, sending straight to ChatGPT.`);
@@ -341,21 +398,34 @@ async function main() {
 
           if (hasImages && !isOverridePoster) {
             // const tweetContext = details.fullText || details.text || item.text || "";
-            if (SKIP_IMAGE_TWEETS /* && tweetContext.length <= 30 */) {
+            if (SKIP_IMAGE_TWEETS && !isTopPriorityPoster /* && tweetContext.length <= 30 */) {
               log(`Tweet ${item.id} has image(s) — SKIP_IMAGE_TWEETS is on, skipping.`);
+              await markSkippedForImage(item.url).catch(err =>
+                log(`Redis write failed for ${item.id}, continuing anyway: ${err}`)
+              );
+              markReplied(item.id);
               await navigator.returnToTimeline();
               dequeue();
               continue;
             }
 
-            log(`=== TWEET ${item.id} HAS IMAGE(S) — PAUSING FOR REVIEW ===`);
-            playNotificationSound();
+            if (isTopPriorityPoster) {
+              log(`Tweet ${item.id} from ${posterHandle} has image(s) — top-priority handle, pausing for your review.`);
+            }
 
-            const decision = await promptImageDecision(
-              details.handle || item.author,
-              details.fullText || details.text || item.text,
-              details.imageUrls.length
-            );
+            log(`=== TWEET ${item.id} HAS IMAGE(S) — PAUSING FOR REVIEW ===`);
+            const stopNotificationLoop = startNotificationLoop();
+
+            let decision: ImageDecision;
+            try {
+              decision = await promptImageDecision(
+                details.handle || item.author,
+                details.fullText || details.text || item.text,
+                details.imageUrls.length
+              );
+            } finally {
+              stopNotificationLoop();
+            }
 
             if (decision === "myself") {
               const manualReply = readlineSync.question(
@@ -466,6 +536,7 @@ async function main() {
 
           if (!reply || !validateReply(reply)) {
             log(`Failed to generate valid reply for ${item.id}. Skipping.`);
+            markReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -495,6 +566,7 @@ async function main() {
         const details = await extractCurrentTweet(page);
         if (!details) {
           log(`Cannot extract tweet ${item.id}. Skipping.`);
+          markReplied(item.id);
           await navigator.returnToTimeline();
           dequeue();
           continue;
@@ -656,6 +728,10 @@ async function main() {
 
         // Check for new notifications between each reply
         try {
+          if (page.isClosed()) {
+            log("Browser tab was closed or crashed. Stopping bot.");
+            break;
+          }
           if (!(await isLoggedIn(page))) {
             log("Session expired. Stopping bot.");
             break;
@@ -668,6 +744,16 @@ async function main() {
               if (hasReplied(ft.id)) continue;
               const existing2 = getQueue().find((q: QueueItem) => q.id === ft.id);
               if (existing2) continue;
+              if (
+                SKIP_IMAGE_TWEETS &&
+                ft.hasImage &&
+                !alwaysSendToChatGPT(ft.username) &&
+                !isTopPriority(ft.author, ft.username)
+              ) {
+                log(`Tweet ${ft.id} has image(s) (detected pre-open) — SKIP_IMAGE_TWEETS is on, skipping.`);
+                markReplied(ft.id);
+                continue;
+              }
               if (Math.random() > replyRatio2) continue;
               markNotificationSeen(ft.id, ft.url);
               enqueue({ id: ft.id, url: ft.url, author: ft.author, text: ft.text, createdAt: Date.now(), status: "pending" }, ft);

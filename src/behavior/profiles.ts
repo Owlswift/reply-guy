@@ -58,9 +58,22 @@ export const PROFILES: Record<BehaviorProfileName, BehaviorProfile> = {
 
 const PROFILE_NAMES = Object.keys(PROFILES) as BehaviorProfileName[];
 
-// Chosen once at startup and kept for the session.
-let activeProfile: BehaviorProfile =
-  PROFILES[PROFILE_NAMES[Math.floor(Math.random() * PROFILE_NAMES.length)]!];
+// Chosen once at startup and kept for the session. Set BEHAVIOR_PROFILE in
+// .env (fast | normal | distracted) to pin it; otherwise picked randomly.
+function pickInitialProfile(): BehaviorProfile {
+  const envName = process.env.BEHAVIOR_PROFILE?.toLowerCase();
+  if (envName) {
+    if (PROFILE_NAMES.includes(envName as BehaviorProfileName)) {
+      return PROFILES[envName as BehaviorProfileName];
+    }
+    console.warn(
+      `[behavior] Invalid BEHAVIOR_PROFILE "${envName}" — expected one of ${PROFILE_NAMES.join(", ")}. Falling back to random.`
+    );
+  }
+  return PROFILES[PROFILE_NAMES[Math.floor(Math.random() * PROFILE_NAMES.length)]!];
+}
+
+let activeProfile: BehaviorProfile = pickInitialProfile();
 
 export function getProfile(): BehaviorProfile {
   return activeProfile;

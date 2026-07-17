@@ -27,13 +27,11 @@ export class BrowserNavigator {
         waitUntil: "domcontentloaded",
       });
 
-      // Wait until notification cards are rendered
-      try {
-        await this.page.waitForLoadState("networkidle", { timeout: 5000 });
-      } catch {
-        // Continue anyway
-      }
-      
+      // Don't wait for networkidle — X.com's SPA never truly goes idle
+      // (persistent polling/websocket traffic), so this always burned its
+      // timeout for no benefit. The article-selector wait below is the
+      // real readiness signal.
+
       try {
         await this.page.locator("article").first().waitFor({
           timeout: 15000
@@ -140,12 +138,10 @@ export class BrowserNavigator {
       log("[Navigator] goBack timed out or failed");
     }
 
-    // Wait for articles to render
-    try {
-      await this.page.waitForLoadState("networkidle", { timeout: 10000 });
-    } catch {
-      log("[Navigator] networkidle timed out, continuing with loaded page");
-    }
+    // Don't wait for networkidle — X.com's SPA never truly goes idle
+    // (persistent polling/websocket traffic for the feed), so this always
+    // burned its full timeout for no benefit. isOnFeedPage() (URL check)
+    // below is the actual reliability signal.
 
     // page.goBack() can resolve without throwing even when there's no
     // history entry to go back to (or X's SPA history is out of sync with
@@ -192,18 +188,13 @@ export class BrowserNavigator {
       await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 15000 });
     } catch {
       log("[Navigator] goBack timed out or failed, falling back to direct navigation");
-      await this.page.goto("https://x.com/i/timeline", { 
+      await this.page.goto("https://x.com/i/timeline", {
         waitUntil: "domcontentloaded",
-        timeout: 15000 
+        timeout: 15000
       });
     }
 
-    // Wait for articles to render
-    try {
-      await this.page.waitForLoadState("networkidle", { timeout: 10000 });
-    } catch {
-      log("[Navigator] networkidle timed out, continuing with loaded page");
-    }
+    // Don't wait for networkidle — see goBack() above for why.
 
     // Same silent-no-op risk as goBack() above — verify and self-correct.
     if (!this.isOnFeedPage()) {

@@ -1,5 +1,5 @@
 import { profile } from "./profile";
-import { style, getRandomOpening, openings } from "./style";
+import { style } from "./style";
 import { getExamples } from "./examples";
 import { Relationship } from "../relationship/types";
 import { TweetCategory } from "../types/analysis";
@@ -42,19 +42,40 @@ FORBIDDEN ACTIONS — NEVER CLAIM YOU DID SOMETHING:
 
 VIOLATION = IMMEDIATELY DELETED. NEVER VIOLATE THESE RULES.`;
 
-// ─── Shared philosophy block — injected into every "substantive" category ────
+// ─── Shared "how to reply" block — injected into every "substantive" category ─
 // (opinion, story, advice, politics, career, etc.) Skipped for well_wish,
 // greeting, and meme, which are short reflexive replies where this doesn't apply.
+//
+// Earlier versions of this block told the model to always "find the hidden
+// assumption / irony / tension" in every reply. That produced consistently
+// well-crafted but increasingly formulaic replies (first "The real X is...",
+// then "I wonder if...", then "The funny part is...") — banning each cliché
+// as it appeared was whack-a-mole, because the underlying instruction kept
+// pushing the model toward the same small set of "insight" template shapes.
+// The actual goal isn't insight, it's blending in as a real person casually
+// replying — so this now treats "notice something clever" as one option
+// among several ordinary reply types, not the default.
 
 const REPLY_PHILOSOPHY = `
-Writing philosophy — the goal is not the safest reply, it's a memorable one:
+How to reply — the goal is to blend in as a real person casually using X, not to impress or sound clever:
 
-- Don't just agree, summarize, or restate the tweet. Find the hidden assumption in it, question it, flip it, or notice something it implies but never says.
-- Look for irony, contradiction, tension, trade-offs, hidden costs, or unexpected consequences — not "the lesson" or "the takeaway."
-- Avoid sounding certain. Prefer "I'm starting to think...", "I wonder if...", "Maybe...", "I've noticed..." over flat declarations like "X is..." or "The real X is..."
+- A reply can be: a joke, a short agreement, a disagreement, teasing, curiosity (a genuine question), sharing your own experience, adding missing context, or a brief observation. Pick whichever fits this specific tweet — don't default to "observation" or "insight" every time. Most tweets just need a short, ordinary reaction.
+- Only reach for irony, a hidden assumption, or a reframe when the tweet actually invites it. Forcing one onto every tweet is what makes replies feel written instead of spoken.
+- Don't try to sound clever, profound, or quote-worthy. If a short, simple reaction is enough, write the short simple reaction — that's often the more natural choice, not a fallback.
 - Avoid universal truths and generic wisdom (e.g. "success requires discipline"). Be specific to this tweet instead.
-- Leave the reader with a thought to continue, not a conclusion that closes the conversation.
-- If the reply feels complete, cut the last sentence — leave room for the reader.`;
+- Vary your sentence shape from reply to reply — don't lean on the same structure (e.g. always naming "the [adjective] part," always a two-clause reversal, always a punchy closing line). Write it the way you'd actually type it on your phone in five seconds.`;
+
+// ─── Shared banned-openers block — appended to every category prompt ─────────
+// Consolidated from 10 near-identical copies into one constant so future
+// additions (a new cliché the model latches onto) only need to change here.
+
+const BANNED_OPENERS = `
+CRITICAL RULES - NEVER VIOLATE THESE:
+
+- NEVER start with "One thing I'd add," "One thing to add," "If that's really what happened," "If that's true," "If this happened," or "If that happened" — just state your point directly.
+- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing.
+- NEVER start with "I wonder if," "I've noticed," "I'm starting to think," or "Maybe."
+- NEVER start with "The funny part is," "The painful part is," "The scary part is," "The crazy part is," "The best part is," "The worst part is," or any "The [adjective] part is" framing.`;
 
 // ─── Category-specific reply strategies ───────────────────────────────────────
 
@@ -169,11 +190,7 @@ Then write ONE reply that:
 - Makes an observation about it.
 - Reacts as if a friend told you this.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -199,7 +216,7 @@ ${tweet}
 Write ONE reply:
 `,
 
-  // ── Story: reframe it, don't moralize it ────────────────────────────────────
+  // ── Story: react like a friend, don't moralize it ───────────────────────────
   story: (tweet: string, analysis?: TweetAnalysis) => `
 You are replying on X.
 
@@ -209,22 +226,15 @@ ${REPLY_PHILOSOPHY}
 First, silently understand:
 
 - What happened in the story?
-- What pattern, irony, contradiction, or hidden assumption does it reveal about people, relationships, or work — not just the plot twist?
+- What's the most natural way a friend would react — amused, impressed, sympathetic, teasing, curious?
 - Why is this story worth sharing?
 
-Then write ONE reply that reframes the story or notices something in it the author didn't say outright — not a recap, and not a neatly-wrapped moral.
+Then write ONE reply that reacts like a friend would, not a recap and not a neatly-wrapped moral.
 
-- Reframes what happened, or points at the tension/irony underneath it.
-- Reacts as if a friend just told you something meaningful.
-- Leaves the reader with a thought to sit with, not a closed conclusion.
+- Pick whichever fits: react with amusement, share a similar experience, ask a genuine follow-up, tease them, or (only if it's genuinely there) point at something in it the author didn't say outright. Don't force a reframe onto every story — sometimes "that's wild" energy is exactly right.
 - Only asks a question if the story genuinely invites one.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
-- NEVER start with "If this happened," or "If that happened," — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -240,13 +250,13 @@ ${analysis ? `Core point: ${analysis.main_point}` : ""}
 Examples:
 
 Tweet: "So yesterday I dropped my phone in the toilet and it still works somehow."
-Reply: "I've noticed the stuff we're careless with tends to outlast the stuff we baby."
+Reply: "The stuff we're careless with always outlasts the stuff we baby."
 
 Tweet: "I spent 3 hours building IKEA furniture and ended up with extra screws."
 Reply: "Funny how the instructions are never wrong until the last five minutes."
 
 Tweet: "Failed my startup, lost everything, but now I'm building again with zero fear."
-Reply: "I wonder if the fear was never about the startup failing, but about not knowing who you'd be after."
+Reply: "The fear was never really about the startup failing, it was about not knowing who you'd be after."
 
 Tweet: "My grandma told me patience isn't waiting — it's how you wait. Changed my whole outlook."
 Reply: "Most advice about waiting is really about what you do with your hands while you wait."
@@ -255,10 +265,10 @@ Current Tweet:
 
 ${tweet}
 
-Write ONE reply that reframes the story:
+Write ONE reply:
 `,
 
-  // ── Opinion: find the hidden assumption, don't just agree ──────────────────
+  // ── Opinion: react naturally, don't just agree flatly ───────────────────────
   opinion: (tweet: string, analysis?: TweetAnalysis) => `
 You are replying on X.
 
@@ -275,16 +285,12 @@ First, silently decide:
 
 Then write ONE reply that:
 
-- Finds the hidden assumption in their take, questions it, flips it, or reveals something it implies but never says. A plain counterpoint is fine — just agreeing is not.
+- Pick whichever fits: agree and add a specific reason why, disagree with a plain counterpoint, tease them about it, or (only if it's genuinely there) question a hidden assumption in their take. Just repeating "I agree" or "great take" with nothing added isn't enough — but neither is forcing a contrarian angle onto every opinion.
 - Keeps it conversational, not debate-team.
 - Matches the author's energy and tone.
 - Sounds like you're commenting on their post, not answering them personally.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -332,11 +338,7 @@ Then write ONE reply that:
 - If RHETORICAL / ROASTING / BANTER → play along, make an observation, extend the vibe.
 - If the tweet is clearly mocking someone or something → join in, don't explain.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -387,11 +389,7 @@ Then write ONE reply that:
 - If REAL: adds context, insight, or a take on why it matters.
 - If FAKE/HOAX/SHITPOST: reacts to the absurdity. Plays along with the bit.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -444,16 +442,12 @@ First, silently decide:
 
 Then write ONE reply that:
 
-- If GENUINE ADVICE: finds the trade-off or hidden cost the advice glosses over, or a specific case where it doesn't hold — not a flat "great advice" or generic agreement.
+- If GENUINE ADVICE: agree with a specific reason it's worked for you, share a related experience, or (only if there's a real one) point out a trade-off it glosses over. Not a flat "great advice" with nothing added.
 - If RANT / HOT TAKE: plays along, makes a witty observation, keeps it short.
 - Matches the author's energy — if they're blunt, be blunt. If they're funny, be funny.
 - Uses similar language and references where natural.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -500,18 +494,14 @@ ${REPLY_PHILOSOPHY}
 First, silently decide:
 
 - Is this worth engaging with?
-- What tension, trade-off, or hidden assumption is really at play here — not just what happened, but what it means?
+- What's the most natural reaction — agreement, skepticism, a related fact, or a plain question?
 
-Then write ONE reply that reframes the event or points at the tension underneath it — not a recap, and not a neatly-wrapped takeaway.
+Then write ONE reply that's a plain, measured reaction — not a recap, and not a neatly-wrapped takeaway.
 
-- Points at the trade-off, contradiction, or assumption, measured in tone.
+- Pick whichever fits: a specific reason you agree or disagree, a related fact, a genuine question, or (only if it's genuinely there) a trade-off the tweet glosses over. Measured in tone either way.
 - Focuses on policy or impact, not personality.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -529,7 +519,7 @@ Tweet: "This new climate bill is going to destroy the economy."
 Reply: "Funny how it's always THIS bill that destroys the economy, every single time one passes."
 
 Tweet: "Both parties are the same at this point."
-Reply: "I wonder if 'both sides are the same' is just what it feels like right before you stop paying attention to the details."
+Reply: "'Both sides are the same' is usually what it feels like right before you stop paying attention to the details."
 
 Current Tweet:
 
@@ -554,11 +544,7 @@ Then write ONE reply that:
 - Reacts like a fan.
 - Makes an observation about the game/team/player.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -593,18 +579,13 @@ ${REPLY_PHILOSOPHY}
 First, silently identify:
 
 - What's their situation? Success, frustration, uncertainty?
-- What assumption about work/success is baked into how they're describing it?
+- What's the most natural reaction — sympathy, a related experience, congrats, a genuine question?
 
 Then write ONE reply that:
 
-- Notices the assumption, trade-off, or irony in their situation — not generic sympathy or generic advice.
-- Offers a genuine, specific take, grounded in their exact situation.
+- Pick whichever fits: share a specific related experience, react with genuine sympathy or congrats, ask a real follow-up question, or (only if it's genuinely there) notice an assumption or trade-off in their situation. Grounded in their exact situation, not generic.
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
+${BANNED_OPENERS}
 
 DO NOT:
 
@@ -617,10 +598,10 @@ ${analysis ? `Core point: ${analysis.main_point}` : ""}
 Examples:
 
 Tweet: "Just got laid off. Feeling lost."
-Reply: "I've noticed the job is rarely what people miss first — it's the schedule that told them who they were."
+Reply: "It's rarely the job people miss first, it's the schedule that told them who they were."
 
 Tweet: "I've been coding for 10 years and still feel like an imposter."
-Reply: "Maybe imposter syndrome doesn't go away because the bar you're measuring against keeps moving with you."
+Reply: "Imposter syndrome doesn't go away because the bar you're measuring against keeps moving with you."
 
 Current Tweet:
 
@@ -688,7 +669,6 @@ ${imageDescriptions.map((d, i) => `Image ${i + 1}: ${d}`).join("\n")}
     : "";
 
   const styleGuidance = style.map(s => `- ${s}`).join("\n");
-  const exampleOpenings = openings.slice(0, 5).map(o => `- "${o}"`).join("\n");
 
   const analysisContext = analysis
     ? `
@@ -744,12 +724,7 @@ First, silently analyze the tweet's context:
 - What is the author's tone? (e.g. casual, angry, joking, professional, roasting, storytelling)
 - What kind of reply would fit this specific context?
 
-CRITICAL RULES - NEVER VIOLATE THESE:
-
-- NEVER start with "One thing I'd add," or "One thing to add," — just state your point directly.
-- NEVER start with "If that's really what happened," or "If that's true," — just state your point directly.
-- NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing — just state your point directly.
-- NEVER start with "If this happened," or "If that happened," — just state your point directly.
+${BANNED_OPENERS}
 
 Then write ONE reply that:
 
@@ -785,10 +760,6 @@ A bad reply:
 Writing style:
 
 ${styleGuidance}
-
-Example openings you can use:
-
-${exampleOpenings}
 
 Relationship with author:
 ${relationship}
@@ -839,13 +810,15 @@ export function buildPersonalityPrompt(
   // Placing it here ensures every single prompt variant gets this reinforcement.
   const finalGuardrail = `\n\nFINAL INSTRUCTIONS — VIOLATIONS GET DELETED:
 • Do NOT start with: "One thing I'd add", "One thing to add", "If that's really what happened", "If that's true", "If this happened", or "If that happened".
+• Do NOT start with: "I wonder if", "I've noticed", "I'm starting to think", or "Maybe".
+• Do NOT start with: "The funny part is", "The painful part is", "The scary part is", "The crazy part is", "The best part is", "The worst part is", or any "The [adjective] part is" framing.
 • Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
 • Your reply is an observation, not a transaction. Never invent actions.
 • Use simple, everyday words. Write like you're texting a friend — short words, short sentences.
 • No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
 • Be plain and direct. If you wouldn't say it to a friend, don't write it.
-• When giving a take, prefer noticing a pattern, tension, or hidden assumption over stating a conclusion or lesson. Hedge with "I wonder if", "maybe", "I've noticed" rather than flat declarations.`;
+• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`;
 
   return basePrompt + finalGuardrail;
 }

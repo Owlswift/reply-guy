@@ -78,6 +78,11 @@ export async function extractTweets(
             const verifiedBadge = article.querySelector('[data-testid="icon-verified"]');
             const verified = !!verifiedBadge;
 
+            // Check for image(s) — same selector extractCurrentTweet.ts uses
+            // once a tweet is opened, so we can filter image tweets out
+            // before ever navigating to them.
+            const hasImage = !!article.querySelector('[data-testid="tweetPhoto"]');
+
             // Extract timestamp
             const timeElement = article.querySelector("time");
             const datetime = timeElement?.getAttribute("datetime") ?? "";
@@ -98,7 +103,8 @@ export async function extractTweets(
                 replies,
                 reposts,
                 source,
-                createdAt
+                createdAt,
+                hasImage
             };
         });
     }, source);
