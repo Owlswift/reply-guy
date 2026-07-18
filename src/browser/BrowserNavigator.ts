@@ -80,6 +80,41 @@ export class BrowserNavigator {
   }
 
   /**
+   * The actual working way to get back to the feed when goBack() isn't an
+   * option: go to /notifications and click the "New post notifications
+   * for..." card, exactly like openNotificationFeed() does on startup. A
+   * plain goto("/i/timeline") gets redirected server-side to /home and is
+   * never a valid fallback — do not reintroduce that here.
+   */
+  private async goToNotificationFeedDirect(): Promise<void> {
+    await this.page.goto("https://x.com/notifications", {
+      waitUntil: "domcontentloaded",
+      timeout: 15000
+    }).catch(() => {});
+
+    try {
+      await this.page.locator("article").first().waitFor({ timeout: 15000 });
+    } catch {
+      return;
+    }
+
+    const card = this.page.locator("article").filter({
+      has: this.page.getByText(/^New post notifications for/)
+    });
+
+    if (await card.count() === 0) {
+      return;
+    }
+
+    try {
+      await card.first().waitFor({ timeout: 5000 });
+      await card.first().click();
+    } catch {
+      // Card didn't click — staying on /notifications is still fine.
+    }
+  }
+
+  /**
    * Navigate to the filtered posts timeline
    */
   async navigateToTimeline(): Promise<void> {
@@ -181,28 +216,25 @@ export class BrowserNavigator {
     }
 
     log("[Navigator] Returning to i/timeline via goBack");
-    
+
     // Use the browser's back button to return to the previous page (i/timeline).
     // This bypasses X.com's server-side redirect that happens with a fresh goto.
     try {
       await this.page.goBack({ waitUntil: "domcontentloaded", timeout: 15000 });
     } catch {
-      log("[Navigator] goBack timed out or failed, falling back to direct navigation");
-      await this.page.goto("https://x.com/i/timeline", {
-        waitUntil: "domcontentloaded",
-        timeout: 15000
-      });
+      log("[Navigator] goBack timed out or failed, falling back to the notifications feed");
+      await this.goToNotificationFeedDirect();
     }
 
     // Don't wait for networkidle — see goBack() above for why.
 
     // Same silent-no-op risk as goBack() above — verify and self-correct.
+    // X's server redirects a plain goto("/i/timeline") to /home, so that's
+    // never a valid fallback here — go through /notifications instead,
+    // exactly like openNotificationFeed() does on startup.
     if (!this.isOnFeedPage()) {
-      log(`[Navigator] returnToTimeline landed on unexpected page (${this.page.url()}) — forcing navigation to i/timeline`);
-      await this.page.goto("https://x.com/i/timeline", {
-        waitUntil: "domcontentloaded",
-        timeout: 15000
-      }).catch(() => {});
+      log(`[Navigator] returnToTimeline landed on unexpected page (${this.page.url()}) — going to notifications instead`);
+      await this.goToNotificationFeedDirect();
     }
 
     // Wait for articles to render

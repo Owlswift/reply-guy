@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getPage } from "./browser/browser";
+import { getPage, getBrowserAndContext } from "./browser/browser";
 import { log, msSinceLastLog } from "./utils/logger";
 import { shouldRefreshSession, markSessionRefreshed } from "./utils/session";
 import { isLoggedIn } from "./browser/isLoggedIn";
@@ -8,8 +8,9 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isLowPriority } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isLowPriority, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
+import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
@@ -143,6 +144,19 @@ async function main() {
   const chatgpt = new ChatGPTClient();
   await chatgpt.init();
   log("ChatGPT client ready");
+
+  // Priority Handles Worker — proactively checks TOP_PRIORITY_HANDLES
+  // profiles for new original posts, on its own tab, independent of the
+  // notification-watching loop below. Fire-and-forget: it runs forever in
+  // the background and feeds the same shared queue.
+  {
+    const { context } = await getBrowserAndContext();
+    const priorityPage = await context.newPage();
+    runPriorityHandleWorker(priorityPage, TOP_PRIORITY_HANDLES).catch(err =>
+      log(`[PriorityHandles] worker crashed, not restarting: ${err}`)
+    );
+    log(`Priority Handles Worker started (${TOP_PRIORITY_HANDLES.length} handles).`);
+  }
 
   // The single source — notifications only
   const notificationSource = new NotificationFeedSource();

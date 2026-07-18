@@ -16,7 +16,9 @@ const PRIORITY_HANDLES: string[] = [
   "@theladymotara",
   "@ok6ixx",
   "@GuntherEagleman",
-  "@lizzkelly7"
+  "@lizzkelly7",
+  "@onjolo_kenya",
+  "@6th_july"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -40,7 +42,7 @@ const URGENT_BONUS = 1000; // massive score boost for urgent handles
  * Top-priority handle — takes precedence over every other handle,
  * including other urgent handles. Always sorts first in the queue.
 */
-const TOP_PRIORITY_HANDLES: string[] = [
+export const TOP_PRIORITY_HANDLES: string[] = [
   "@realmfpriya",
   "@kemi_adeleke1",
   "@bluewdrift",
@@ -74,10 +76,15 @@ export const LOW_PRIORITY_HANDLES: string[] = [
   "@theglobalZinny",
   "@J_I_Khalifa",
   "@Tallesty_",
-  "@6th_july",
   "@Hakeem081",
   "@ZTWzanku",
-  "@toxic_angeui"
+  "@toxic_angeui",
+  "@HamidXBT",
+  "@NOT__RILEY",
+  "@maamblaq_trade",
+  "@KeruboSk",
+  "@Anietie_bassey1",
+  "@LEGACE_FX"
 ];
 
 /**
