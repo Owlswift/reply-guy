@@ -8,6 +8,10 @@ export interface TweetDetails {
   fullText: string;
   url: string;
   imageUrls: string[];
+  // Epoch ms of the most recently posted segment in the thread (the
+  // anchor's own time if it's a single tweet). Lets callers tell a thread
+  // that's still actively being posted apart from one that's settled.
+  latestSegmentAt: number;
 }
 
 const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
@@ -123,12 +127,14 @@ export async function extractCurrentTweet(
   // pulled back in just because the handle matches).
   const seenTexts = new Set<string>();
   const threadTexts: string[] = [];
-  const record = (text: string) => {
+  let latestSegmentAt = anchor.time;
+  const record = (text: string, time: number) => {
     if (!text || seenTexts.has(text)) return;
     seenTexts.add(text);
     threadTexts.push(text);
+    if (time > latestSegmentAt) latestSegmentAt = time;
   };
-  record(anchor.text);
+  record(anchor.text, anchor.time);
 
   for (let i = 1; i < articles.length; i++) {
     const article = articles[i];
@@ -136,7 +142,7 @@ export async function extractCurrentTweet(
     const parsed = await readArticle(article);
     if (!parsed || parsed.handle !== rootHandle) break;
     if (Math.abs(parsed.time - anchor.time) > TIME_WINDOW_MS) break;
-    record(parsed.text);
+    record(parsed.text, parsed.time);
   }
 
   const fullText = threadTexts.join("\n\n");
@@ -153,6 +159,7 @@ export async function extractCurrentTweet(
     text: firstText,
     fullText,
     url: page.url(),
-    imageUrls
+    imageUrls,
+    latestSegmentAt
   };
 }

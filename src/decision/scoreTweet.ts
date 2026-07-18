@@ -1,6 +1,20 @@
 import { TimelineTweet } from "../types/tweet";
 
 /**
+ * Normalize a handle for comparison: pull out the @handle if it's embedded
+ * in a longer string (TimelineTweet.author is the raw display-name text,
+ * e.g. "S writes@WrittenBy_SS", not just the handle), strip the leading
+ * @, lowercase. Applying this to BOTH sides of every comparison below is
+ * load-bearing — a previous version stripped @ from the handle list but
+ * not from the tweet's own username field, so e.g. isTopPriority() was
+ * comparing "@writtenby_ss" against "writtenby_ss" and could never match.
+ */
+function normalizeHandle(value: string): string {
+  const match = value.match(/@\w+/);
+  return (match ? match[0] : value).replace(/^@/, "").toLowerCase();
+}
+
+/**
  * Priority handles — tweets from these authors get a flat score bonus
  * so they rank higher in the queue regardless of age/replies.
  * Edit this list to add your priority accounts.
@@ -18,7 +32,9 @@ const PRIORITY_HANDLES: string[] = [
   "@GuntherEagleman",
   "@lizzkelly7",
   "@onjolo_kenya",
-  "@6th_july"
+  "@6th_july",
+  "@Fun_Trades1",
+  "@RiddleSphere"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -34,6 +50,7 @@ const URGENT_HANDLES: string[] = [
   "@badger69420",
   "piersmorgan",
   "AlexHormozi",
+  "@gumvape"
 ];
 
 const URGENT_BONUS = 1000; // massive score boost for urgent handles
@@ -91,10 +108,10 @@ export const LOW_PRIORITY_HANDLES: string[] = [
  * Check if the author is a low-priority handle.
  */
 export function isLowPriority(author: string, username: string): boolean {
-  const normalized = author.replace(/^@/, "").toLowerCase();
-  const normalizedUser = username.toLowerCase();
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
   return LOW_PRIORITY_HANDLES.some(
-    h => normalized === h.replace(/^@/, "").toLowerCase() || normalizedUser === h.replace(/^@/, "").toLowerCase()
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   );
 }
 
@@ -186,13 +203,13 @@ function topicScore(_text: string): number {
  * Check if the author is an urgent handle.
  */
 export function isUrgent(author: string, username: string): boolean {
-  const normalized = author.replace(/^@/, "").toLowerCase();
-  const normalizedUser = username.toLowerCase();
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
   // Top-priority handles inherit all urgent-handle behavior (spam/age bypass)
   // in addition to outranking every other handle in score.
   if (isTopPriority(author, username)) return true;
   return URGENT_HANDLES.some(
-    h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   );
 }
 
@@ -200,10 +217,10 @@ export function isUrgent(author: string, username: string): boolean {
  * Check if the author is a priority handle and return bonus.
  */
 function priorityBonus(author: string, username: string): number {
-  const normalized = author.replace(/^@/, "").toLowerCase();
-  const normalizedUser = username.toLowerCase();
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
   return PRIORITY_HANDLES.some(
-    h => normalized === h.toLowerCase() || normalizedUser === h.toLowerCase()
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   ) ? PRIORITY_BONUS : 0;
 }
 
@@ -218,10 +235,10 @@ function urgentBonus(author: string, username: string): number {
  * Check if the author is the top-priority handle.
  */
 export function isTopPriority(author: string, username: string): boolean {
-  const normalized = author.replace(/^@/, "").toLowerCase();
-  const normalizedUser = username.toLowerCase();
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
   return TOP_PRIORITY_HANDLES.some(
-    h => normalized === h.replace(/^@/, "").toLowerCase() || normalizedUser === h.replace(/^@/, "").toLowerCase()
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   );
 }
 

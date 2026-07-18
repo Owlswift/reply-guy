@@ -24,13 +24,20 @@ const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 /**
  * Visit a profile's Posts tab and collect original posts — not reposts,
- * not the pinned tweet, not replies — newer than lastSeenTweetId.
+ * not replies, and not stale pins — newer than lastSeenTweetId.
  *
  * Reposts and pinned tweets are identified by X's own
  * [data-testid="socialContext"] label ("X reposted", "Pinned"), verified
  * against a live profile. Replies-to-others don't appear on the default
  * Posts tab at all, so no separate reply check is needed there — only a
  * defensive check for a self-thread continuation showing "Replying to".
+ *
+ * A pinned tweet is included if it's actually fresh (under the age cutoff)
+ * rather than always skipped — pinning doesn't imply "old evergreen post,"
+ * an author can pin something they posted an hour ago. It's just never
+ * allowed to drive the lastSeenTweetId cursor, since its position (always
+ * slot 0) doesn't reflect chronological order and using it as the cursor
+ * would permanently block the scan on every future visit.
  */
 export async function visitProfileForNewOriginals(
   page: Page,
@@ -95,25 +102,44 @@ export async function visitProfileForNewOriginals(
 
     if (!info.id) continue;
 
-    // The topmost article is always the newest thing on the profile, even
-    // if it's a repost/pinned tweet we skip below — it's still the correct
-    // cursor for "have I already seen everything up to here" next time.
-    if (i === 0) {
-      newestTweetId = info.id;
+    // A pinned tweet sits at position 0 forever, regardless of when it was
+    // actually posted — it can be brand new or years old, and either way
+    // it does NOT reflect chronological order relative to what's below it.
+    // Reposts have the same problem (a years-old tweet can get reposted
+    // today). Only a genuine chronological post can safely be used as the
+    // "have I already scanned past everything new" cursor or trigger the
+    // age-based cutoff — using a pinned tweet's ID for that would poison
+    // the cursor permanently: every future visit would see article[0]
+    // match lastSeenTweetId (itself) and break before ever checking
+    // article[1] onward again.
+    const isChronological = !info.isPinned && !info.isRepost;
+
+    if (isChronological) {
+      if (newestTweetId === null) {
+        newestTweetId = info.id;
+      }
+      if (lastSeenTweetId && info.id === lastSeenTweetId) {
+        break;
+      }
+      if (info.datetime && Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS) {
+        // Profiles list posts newest-first, so once we hit a chronological
+        // one over 12hr old everything after it is even older — stop.
+        break;
+      }
     }
 
-    if (lastSeenTweetId && info.id === lastSeenTweetId) {
-      break;
-    }
-
-    if (info.datetime && Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS) {
-      // Profiles list posts newest-first, so once we hit one over 12hr old
-      // everything after it is even older — stop scanning entirely.
-      break;
-    }
-
-    if (info.isRepost || info.isPinned || info.isReply || !info.text) {
+    if (info.isRepost || info.isReply || !info.text) {
       continue;
+    }
+
+    // Pinned tweets are judged on their own merits (just the age check)
+    // instead of being unconditionally skipped — a pin can be a genuinely
+    // fresh post the author wants visible, not just old evergreen content.
+    if (info.isPinned) {
+      const ageMs = info.datetime ? Date.now() - new Date(info.datetime).getTime() : Infinity;
+      if (ageMs > MAX_AGE_MS) {
+        continue;
+      }
     }
 
     found.push({

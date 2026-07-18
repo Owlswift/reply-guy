@@ -59,6 +59,7 @@ VIOLATION = IMMEDIATELY DELETED. NEVER VIOLATE THESE RULES.`;
 const REPLY_PHILOSOPHY = `
 How to reply — the goal is to blend in as a real person casually using X, not to impress or sound clever:
 
+- Your job is NOT to summarize or restate the tweet. Assume the reader already read it — repeating what it already said, even reworded or dressed up as an "insight," isn't a reply, it's a recap. A good reply does ONE of: makes an observation the author didn't make, points out an irony, adds a different perspective, makes a light joke, relates with a short experience of your own, asks a genuine question, or politely disagrees.
 - A reply can be: a joke, a short agreement, a disagreement, teasing, curiosity (a genuine question), sharing your own experience, adding missing context, or a brief observation. Pick whichever fits this specific tweet — don't default to "observation" or "insight" every time. Most tweets just need a short, ordinary reaction.
 - Only reach for irony, a hidden assumption, or a reframe when the tweet actually invites it. Forcing one onto every tweet is what makes replies feel written instead of spoken.
 - Don't try to sound clever, profound, or quote-worthy. If a short, simple reaction is enough, write the short simple reaction — that's often the more natural choice, not a fallback.
@@ -72,10 +73,83 @@ How to reply — the goal is to blend in as a real person casually using X, not 
 const BANNED_OPENERS = `
 CRITICAL RULES - NEVER VIOLATE THESE:
 
+- NEVER restate or summarize the tweet in different words, even dressed up as an "insight." If the reader could say "that's just what the tweet already said," it's a recap, not a reply — this is the single most common way these replies fail.
 - NEVER start with "One thing I'd add," "One thing to add," "If that's really what happened," "If that's true," "If this happened," or "If that happened" — just state your point directly.
 - NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing.
+- NEVER write "X wasn't really about Y, it was about Z," "X isn't about Y, it's Z," "That wasn't about [X]," or "This just proves [X]" — these are all the same cliché reframe/summary trick in different words. If your reply's structure is "[thing] wasn't about [surface reason], it was [real reason]," rewrite it.
 - NEVER start with "I wonder if," "I've noticed," "I'm starting to think," or "Maybe."
 - NEVER start with "The funny part is," "The painful part is," "The scary part is," "The crazy part is," "The best part is," "The worst part is," or any "The [adjective] part is" framing.`;
+
+// ─── Reply modes — explicit rotation instead of one implicit default ─────────
+// Most replies stay short (REPLY_PHILOSOPHY's default). But letting the
+// model freely pick "what kind of reply" every time converges on one or two
+// safe defaults in practice. Assigning an explicit mode per reply, drawn
+// from a weighted rotation, produces the variety a real person's replies
+// actually have — sometimes a developed thought, sometimes just a joke,
+// sometimes a genuine question — without ever making any one shape the
+// constant default (constant "reflective" is just as recognizable a
+// pattern as constant "short one-liner").
+type ReplyMode = "reflective" | "clever_observation" | "personal_perspective" | "light_humor" | "question";
+
+const REPLY_MODE_WEIGHTS: Array<[ReplyMode, number]> = [
+  ["reflective", 0.40],
+  ["clever_observation", 0.25],
+  ["personal_perspective", 0.15],
+  ["light_humor", 0.10],
+  ["question", 0.10],
+];
+
+function pickReplyMode(): ReplyMode {
+  const r = Math.random();
+  let cumulative = 0;
+  for (const [mode, weight] of REPLY_MODE_WEIGHTS) {
+    cumulative += weight;
+    if (r < cumulative) return mode;
+  }
+  return "reflective";
+}
+
+// The trap to avoid in reflective mode: "more lines" is not what makes these
+// work. The reframe-reveal trick ("X isn't about Y, it's Z", "Most people
+// think X, I think Y") is banned above for being a cliché — stretching that
+// same move across 3 lines instead of 1 doesn't stop being the same cliché.
+// The bar is developed THOUGHTS, not a line-count minimum: "Trust is hard to
+// rebuild. Once it's gone, everything changes." is two lines and still one
+// generic thought restated. Two lines that each add something distinct is
+// what actually reads as someone who stopped to think, not a word-count.
+const REPLY_MODE_BLOCKS: Record<ReplyMode, string> = {
+  reflective: `
+REFLECTIVE MODE for this reply — you have more room than usual:
+
+Write at least TWO developed thoughts — not two lines, two distinct steps in the idea. That usually comes out to 2-5 short lines, but the line count is a side effect, not the goal; two lines that just restate the same point in different words is still only one thought and doesn't satisfy this. Good shapes:
+- An observation, then what it reveals or implies — optionally a third line that extends it further.
+- A specific example, followed by what it actually shows.
+- A small real argument: a claim, then a specific reason or scenario that backs it.
+
+Imagine someone would like or quote YOUR REPLY, not the original tweet — without ever having read the tweet, it should hold up as a complete, real thought on its own.
+
+Still banned even here: "X isn't about Y, it's Z," "Most people think X, but I think Y," or any two-part reveal where the first part restates the tweet and the second "unveils" the deeper truth. Stretching that trick across more lines doesn't stop it from being the same cliché — it's the most common way a reflective reply turns into exactly the AI-sounding pattern this prompt exists to avoid.`,
+
+  clever_observation: `
+CLEVER OBSERVATION MODE for this reply:
+
+One sharp line noticing something in the tweet the author didn't spell out — an irony, a contradiction, an assumption worth poking at. This is about precision, not length: one sentence, maybe two.`,
+
+  personal_perspective: `
+PERSONAL PERSPECTIVE MODE for this reply:
+
+Share a brief, specific experience of your own that relates to the tweet — something that actually happened, not a generic "I feel you" or "been there." One or two sentences, concrete, not vague.`,
+
+  light_humor: `
+LIGHT HUMOR MODE for this reply:
+
+A playful, funny line reacting to the tweet. Keep it short — this is a quip, not a bit.`,
+
+  question: `
+QUESTION MODE for this reply:
+
+Ask ONE genuine follow-up question that shows you actually engaged with the specifics of the tweet — not a rhetorical or generic "what happened next?" question. It should come from real curiosity, not from needing to fill space.`,
+};
 
 // ─── Category-specific reply strategies ───────────────────────────────────────
 
@@ -298,6 +372,7 @@ Then write ONE reply that:
 - Keeps it conversational, not debate-team.
 - Matches the author's energy and tone.
 - Sounds like you're commenting on their post, not answering them personally.
+- Never restates or summarizes the tweet in different words. Read your reply back against the tweet — if someone could reasonably say "that's just what they already said," it's a paraphrase, not a reply, even if agreeing or disagreeing. Every reply must contribute something the tweet didn't already say: a new observation, an implication the author didn't spell out, a contrast, an example, or an angle that pushes the idea one step further.
 
 ${BANNED_OPENERS}
 
@@ -306,6 +381,7 @@ DO NOT:
 - Act like the tweet was directed at you.
 - Start with "Got it", "Understood", "I hear you", "Fair enough", or any customer-service language.
 - Just say "I agree" or "Great take."
+- Restate the tweet's own point back at it with different wording — this is the single most common way these replies fail. "X isn't the problem, Y is" restated as "X is fine, Y is what matters" is the same sentence, not a reply.
 - Lecture the author.
 - Sound like ChatGPT.
 
@@ -321,6 +397,11 @@ Reply: "Bad company culture maybe. Good culture adapts."
 
 Tweet: "I be ignoring hints on purpose. Speak up & say it with your chest."
 Reply: "Fair. Hints are just noise anyway."
+
+Tweet: "Matchmaking isn't the problem. Forcing two people together when they have no feelings for each other is."
+Bad reply (paraphrase — just restates "introducing ≠ forcing" in new words): "An introduction is one thing. The choice still has to belong to the two people."
+Good reply (pushes the idea further): "The problem has never been introductions. It's treating marriage like an obligation instead of a choice."
+Also good (adds a distinction the tweet didn't make): "People confuse arranged marriages with forced marriages. They're not the same thing."
 
 Current Tweet:
 
@@ -794,6 +875,11 @@ Write ONE reply that matches this tweet's context and sounds like me.
 `;
 }
 
+// Categories substantive enough for an assigned reply mode to make sense.
+// Excludes well_wish, greeting, meme, humor, question, sports, news, general
+// — those are meant to stay light/quick by design, not just by default.
+const MODE_ELIGIBLE_CATEGORIES: TweetCategory[] = ["story", "opinion", "advice", "politics", "career"];
+
 // ─── Main entry point ────────────────────────────────────────────────────────
 
 export function buildPersonalityPrompt(
@@ -815,10 +901,19 @@ export function buildPersonalityPrompt(
     ? categoryPromptFn(tweet, analysis)
     : buildGenericPrompt(tweet, relationship, normalized, memories, imageDescriptions, analysis);
 
+  // For eligible, substantive tweets, assign an explicit reply mode from
+  // the weighted rotation above instead of leaving "what kind of reply"
+  // fully up to the model — see REPLY_MODE_WEIGHTS for why.
+  const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized) ? pickReplyMode() : null;
+  const modeBlock = mode ? `\n${REPLY_MODE_BLOCKS[mode]}\n` : "";
+
   // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
   // Placing it here ensures every single prompt variant gets this reinforcement.
   const finalGuardrail = `\n\nFINAL INSTRUCTIONS — VIOLATIONS GET DELETED:
+• Before you write, ask: does this reply say something the tweet didn't already say? If not, it's a summary wearing a reply's clothes — start over.
+• Do NOT restate or summarize the tweet, even reworded or dressed up as an "insight." Assume the reader already read the tweet.
 • Do NOT start with: "One thing I'd add", "One thing to add", "If that's really what happened", "If that's true", "If this happened", or "If that happened".
+• Do NOT write "X wasn't really about Y, it was about Z", "X isn't about Y, it's Z", "That wasn't about X", or "This just proves X" — same cliché reframe/summary trick in different words. This also usually means you're just restating the tweet's own point as a punchline instead of adding something — check for that too.
 • Do NOT start with: "I wonder if", "I've noticed", "I'm starting to think", or "Maybe".
 • Do NOT start with: "The funny part is", "The painful part is", "The scary part is", "The crazy part is", "The best part is", "The worst part is", or any "The [adjective] part is" framing.
 • Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
@@ -827,9 +922,11 @@ export function buildPersonalityPrompt(
 • No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
 • Be plain and direct. If you wouldn't say it to a friend, don't write it.
-• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`;
+${mode === "reflective"
+  ? `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`
+  : `• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`}`;
 
-  return basePrompt + finalGuardrail;
+  return basePrompt + modeBlock + finalGuardrail;
 }
 
 // Export for testing
