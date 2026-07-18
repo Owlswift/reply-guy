@@ -15,7 +15,8 @@ const PRIORITY_HANDLES: string[] = [
   "@Anathenumberone",
   "@theladymotara",
   "@ok6ixx",
-  "@bluewdrift"
+  "@GuntherEagleman",
+  "@lizzkelly7"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -26,15 +27,10 @@ const PRIORITY_BONUS = 30; // flat score boost for priority handles
  * The massive bonus ensures they always rank at the top of the queue.
 */
 const URGENT_HANDLES: string[] = [
-  "@sama",
-  "@WatcherGuru",
-  "@Sassafrass_84",
   "@PlanetOfMemes",
   "@QueenAnticommie",
-  "@GuntherEagleman",
   "@badger69420",
   "piersmorgan",
-  "unkonfined",
   "AlexHormozi",
 ];
 
@@ -43,13 +39,57 @@ const URGENT_BONUS = 1000; // massive score boost for urgent handles
 /**
  * Top-priority handle — takes precedence over every other handle,
  * including other urgent handles. Always sorts first in the queue.
- */
+*/
 const TOP_PRIORITY_HANDLES: string[] = [
   "@realmfpriya",
-  "@kemi_adeleke1"
+  "@kemi_adeleke1",
+  "@bluewdrift",
+  "@WrittenBy_SS",
+  "@Mario_Sneh",
+  "@FitWithDrSam",
+  "@ManhoodDecoded",
+  "@TheManOfNuances",
+  "@JeremyTate41"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
+
+/**
+ * Low-priority handles — tweets from these authors are never scored or
+ * enqueued normally. main-interactive.ts defers their URLs to a Redis
+ * cache instead and only pulls them back in once the real queue
+ * (top-priority, urgent, everything else) is completely empty.
+ */
+export const LOW_PRIORITY_HANDLES: string[] = [
+  "@brotherhood__33",
+  "@O1Txtx",
+  "@FablosJanny",
+  "@cyrilhustle",
+  "@Medally07",
+  "@EniolaFunmii",
+  "@Betty_homz",
+  "@otspiccy",
+  "@otuene_claude",
+  "@RiddleSphere",
+  "@theglobalZinny",
+  "@J_I_Khalifa",
+  "@Tallesty_",
+  "@6th_july",
+  "@Hakeem081",
+  "@ZTWzanku",
+  "@toxic_angeui"
+];
+
+/**
+ * Check if the author is a low-priority handle.
+ */
+export function isLowPriority(author: string, username: string): boolean {
+  const normalized = author.replace(/^@/, "").toLowerCase();
+  const normalizedUser = username.toLowerCase();
+  return LOW_PRIORITY_HANDLES.some(
+    h => normalized === h.replace(/^@/, "").toLowerCase() || normalizedUser === h.replace(/^@/, "").toLowerCase()
+  );
+}
 
 /**
  * Compute how visible a new reply on this tweet is likely to be.
@@ -222,20 +262,20 @@ export function scoreTweet(tweet: TimelineTweet): number {
  * Should we skip this tweet entirely based on age + reply count?
  *
  * The matrix:
- *   - Age > 3 hr → skip regardless
- *   - Age > 1 hr AND replies > 100 → skip
- *   - Age > 30 min AND replies > 250 → skip
+ *   - Replies > 50 → skip regardless of age (a reply that deep in a
+ *     thread won't get seen, no matter how fresh the tweet still is)
+ *   - Age > 12 hr → skip regardless of reply count
  */
 export function shouldSkipDueToAgeAndReplies(tweet: TimelineTweet): boolean {
   // Urgent handles (e.g. @WatcherGuru) are never skipped due to age/replies
   if (isUrgent(tweet.author, tweet.username)) return false;
 
+  if (tweet.replies > 50) return true;
+
   const now = Date.now();
   const ageMs = now - tweet.createdAt.getTime();
   const ageMinutes = Math.max(0, ageMs / 60_000);
 
-  if (ageMinutes > 180) return true;                 // > 3 hr → skip
-  if (ageMinutes > 60 && tweet.replies > 100) return true;   // > 1 hr + crowded
-  if (ageMinutes > 30 && tweet.replies > 250) return true;   // > 30 min + very crowded
+  if (ageMinutes > 720) return true;                 // > 12 hr → skip
   return false;
 }

@@ -1,20 +1,30 @@
 import ollama from "ollama";
 
-export interface Score {
-  name: string;
-  score: number; // 1-10
-}
-
 export interface JudgedReply {
   reply: string;
-  scores: Score[];
-  total: number;
+  worthPosting: boolean;
+  contributionType: string;
+  reason: string;
+  score: number; // 0-10, used only to rank/break ties — worthPosting is the real gate
 }
 
+const FALLBACK: Omit<JudgedReply, "reply"> = {
+  worthPosting: false,
+  contributionType: "none",
+  reason: "judge call failed to parse — defaulting to reject",
+  score: 0,
+};
+
 /**
- * Step 4: Judge a reply's quality before showing it to the user.
- * 
- * Scores multiple dimensions and picks the best one.
+ * Step 4: Judge whether a reply is actually worth posting.
+ *
+ * The bar isn't "is this educational" — it's "does this make the thread
+ * better." A reply clears that bar if it does at least one of: adds a
+ * useful insight, shares a relatable experience, makes a relevant joke,
+ * challenges the premise respectfully, asks a thoughtful question,
+ * provides missing context, or extends the discussion. Generic filler
+ * ("I agree", "😂😂😂", "That's true") clears none of those and should
+ * be rejected regardless of how "correct" it is.
  */
 export async function judgeReplies(
   tweet: string,
@@ -26,33 +36,42 @@ export async function judgeReplies(
     const response = await ollama.chat({
       model: "gpt-oss:20b",
       options: {
-        temperature: 0.2, // Low temp for consistent scoring
+        temperature: 0.2, // Low temp for consistent judging
       },
       messages: [
         {
           role: "system",
           content: `
-You are judging reply quality for X (Twitter).
+You are judging whether a reply to a tweet on X (Twitter) is worth posting.
 
-Score this reply on 4 dimensions.
+The question isn't whether the reply is educational or grammatically
+correct. It's: would a stranger scrolling this thread think this reply
+was worth reading? Does it make the thread better?
 
-Return JSON only.
+A reply is worth posting if it does AT LEAST ONE of:
+- adds a useful insight
+- shares a relatable experience
+- makes a relevant joke
+- challenges the premise respectfully
+- asks a thoughtful question
+- provides missing context
+- extends the discussion
+
+Generic filler ("I agree", "That's true", "😂😂😂", or anything that just
+restates the tweet) is NOT worth posting, even if it's on-topic and
+grammatically fine.
+
+Return JSON only:
 
 {
-  "relevance": 0,
-  "humor": 0,
-  "naturalness": 0,
-  "originality": 0
+  "worth_posting": true or false,
+  "contribution_type": "insight" | "experience" | "joke" | "challenge" | "question" | "context" | "extension" | "none",
+  "score": 0,
+  "reason": "one sentence"
 }
 
-Each score is 1-10.
-
-- relevance: does it actually respond to the tweet?
-- humor: is it witty or funny? (even for serious tweets, a light touch counts)
-- naturalness: does it sound like a human wrote it?
-- originality: is it creative or just repeating the tweet?
-
-Output ONLY the JSON.
+"score" is 0-10 and reflects overall quality — used only to rank replies
+against each other, not as the pass/fail bar. Output ONLY the JSON.
 `
         },
         {
@@ -62,38 +81,36 @@ Tweet: ${tweet}
 
 Reply: ${reply}
 
-Score this reply.
+Judge this reply.
 `
         }
       ]
     });
 
     try {
-      const scores = JSON.parse(response.message.content.trim()) as Record<string, number>;
-      const scoreList: Score[] = [
-        { name: "relevance", score: scores.relevance ?? 5 },
-        { name: "humor", score: scores.humor ?? 5 },
-        { name: "naturalness", score: scores.naturalness ?? 5 },
-        { name: "originality", score: scores.originality ?? 5 },
-      ];
-      const total = scoreList.reduce((sum, s) => sum + s.score, 0);
-      results.push({ reply, scores: scoreList, total });
-    } catch {
+      const parsed = JSON.parse(response.message.content.trim()) as {
+        worth_posting?: boolean;
+        contribution_type?: string;
+        score?: number;
+        reason?: string;
+      };
       results.push({
         reply,
-        scores: [
-          { name: "relevance", score: 5 },
-          { name: "humor", score: 5 },
-          { name: "naturalness", score: 5 },
-          { name: "originality", score: 5 },
-        ],
-        total: 20,
+        worthPosting: parsed.worth_posting ?? false,
+        contributionType: parsed.contribution_type ?? "none",
+        score: parsed.score ?? 0,
+        reason: parsed.reason ?? "",
       });
+    } catch {
+      results.push({ reply, ...FALLBACK });
     }
   }
 
-  // Sort by total score descending
-  results.sort((a, b) => b.total - a.total);
+  // Worth-posting replies first, then by score descending.
+  results.sort((a, b) => {
+    if (a.worthPosting !== b.worthPosting) return a.worthPosting ? -1 : 1;
+    return b.score - a.score;
+  });
 
   return results;
 }

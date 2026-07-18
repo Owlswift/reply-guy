@@ -95,7 +95,17 @@ Write ONE reply. Natural. Concise. 25 words max.
 
   let reply = response.message.content.trim();
   reply = reply.replace(/^[-*•]\s*/, "");
-  reply = reply.replace(/[\-\u2011\u2013\u2014]/g, "");
+  // Replace dashes used as a clause break with a comma instead of stripping
+  // them outright \u2014 a blanket strip also deletes the dash out of compound
+  // words (e.g. "well-wish" -> "wellwish"). A dash with whitespace on both
+  // sides is a clause break; a bare hyphen between two words is a normal
+  // compound word and stays untouched.
+  reply = reply
+    .replace(/\s+[\-\u2011\u2013\u2014]\s+/g, ", ")
+    .replace(/[\u2013\u2014]/g, ", ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s+,/g, ",")
+    .trim();
 
   return reply;
 }

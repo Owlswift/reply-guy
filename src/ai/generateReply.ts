@@ -151,8 +151,18 @@ export async function generateReply(
 
   // Strip leading bullet points or dashes
   reply = reply.replace(/^[-*•]\s*/, "");
-  // Strip all hyphen/dash variants
-  reply = reply.replace(/[\-\u2011\u2013\u2014]/g, "");
+  // Replace dashes used as a clause break (" - ", " \u2014 ", " \u2013 ") with a comma \u2014
+  // not a blanket strip, which used to delete the dash out of compound words
+  // too (e.g. "well-wish" -> "wellwish"). Only a dash with whitespace on
+  // both sides is a clause break; a bare hyphen between two words is a
+  // normal compound word and stays untouched. En/em dashes (\u2013, \u2014)
+  // are never legitimate mid-word joiners, so those become a comma either way.
+  reply = reply
+    .replace(/\s+[\-\u2011\u2013\u2014]\s+/g, ", ")
+    .replace(/[\u2013\u2014]/g, ", ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s+,/g, ",")
+    .trim();
 
   return reply;
 }

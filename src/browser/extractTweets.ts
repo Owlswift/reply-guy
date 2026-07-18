@@ -1,6 +1,7 @@
 import { Page } from "playwright";
 import { TimelineTweet } from "../types/tweet";
 import { log } from "../utils/logger";
+import { expandTweet } from "./expandTweet";
 
 export type TweetSourceType = "notifications" | "timeline" | "watchlist";
 
@@ -37,6 +38,10 @@ export async function extractTweets(
 
     // Give X a moment to render everything
     await page.waitForTimeout(2000);
+
+    // Expand "Show more" so scoring/decisions see full text, not the
+    // truncated preview — same helper the reply-drafting path already uses.
+    await expandTweet(page);
 
     const tweets = await page.locator("article").evaluateAll((articles, source) => {
         // Defense in depth: only keep top-level articles. On a conversation page the
@@ -83,8 +88,34 @@ export async function extractTweets(
             // before ever navigating to them.
             const hasImage = !!article.querySelector('[data-testid="tweetPhoto"]');
 
-            // Extract timestamp
-            const timeElement = article.querySelector("time");
+            // Extract timestamp. When this tweet quote-tweets or previews
+            // another one, the article contains two <time> elements and
+            // their DOM order isn't reliable (verified: a plain quote-tweet
+            // puts the quoted tweet's older <time> first, but a "show this
+            // thread" preview card puts the newer one first). What IS
+            // consistent: this tweet's own <time> is wrapped in an
+            // <a role="link"> (a direct permalink anchor), while a nested/
+            // quoted tweet's <time> is wrapped in a <div role="link">
+            // (the quote-card container) — walk up from each <time> to its
+            // closest role="link" ancestor and use the tag to tell them apart.
+            const times: any[] = Array.from(article.querySelectorAll("time"));
+            let ownTime: any = null;
+            for (const t of times) {
+                let el: any = t.parentElement;
+                let roleLinkTag: string | null = null;
+                while (el && el !== article) {
+                    if (el.getAttribute("role") === "link") {
+                        roleLinkTag = el.tagName;
+                        break;
+                    }
+                    el = el.parentElement;
+                }
+                if (roleLinkTag === "A") {
+                    ownTime = t;
+                    break;
+                }
+            }
+            const timeElement = ownTime ?? times[0] ?? null;
             const datetime = timeElement?.getAttribute("datetime") ?? "";
             const createdAt = datetime ? new Date(datetime) : new Date();
 

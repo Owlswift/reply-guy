@@ -8,7 +8,8 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isLowPriority } from "./decision/scoreTweet";
+import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
@@ -20,6 +21,7 @@ import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
 import { generateReply as generateOllamaReply } from "./ai/generateReply";
+import { judgeReplies } from "./ai/judgeReply";
 import chalk from "chalk";
 import { describeImages } from "./ai/vision";
 import { downloadImages, cleanupImages } from "./ai/downloadImage";
@@ -38,6 +40,21 @@ import {
 } from "./behavior/scheduler";
 
 const DAILY_LIMIT = 300;
+
+// Playwright occasionally races its own internal handling of a native
+// browser dialog (window.confirm/alert/beforeunload) against the dialog
+// already closing — "Page.handleJavaScriptDialog: No dialog is showing" —
+// and that rejection fires from an internal event listener we never
+// awaited, so it can't be caught by a normal try/catch around our own
+// code. Left unhandled, Node treats it as fatal and kills the whole
+// process mid-reply. Log it and keep running instead — this is a rare
+// library-internal race, not a sign the app's own state is corrupt.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection] continuing anyway:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException] continuing anyway:", err);
+});
 
 /**
  * Watchdog — Playwright calls against a hung browser tab/CDP connection can
@@ -110,6 +127,15 @@ async function main() {
   const watchdog = startWatchdog();
   const page = await getPage();
   const navigator = createNavigator(page);
+
+  // Dismiss native browser dialogs (window.confirm/alert/beforeunload)
+  // ourselves as soon as they appear, instead of leaving it to Playwright's
+  // internal default handling — that default handling is what raced against
+  // a dialog closing on its own and threw an unhandled rejection that used
+  // to crash the whole process.
+  page.on("dialog", (dialog) => {
+    dialog.dismiss().catch(() => {});
+  });
 
   log(`Behavior profile: ${getProfileLabel()}`);
 
@@ -202,6 +228,16 @@ async function main() {
           continue;
         }
 
+        // Too old and/or too crowded (scoreTweet.ts) — this was previously
+        // only ever used for the "⛔ SKIP" label in the log above and never
+        // actually enforced, so stale/saturated posts kept getting queued
+        // and replied to anyway. Enforce it here.
+        if (shouldSkipDueToAgeAndReplies(tweet)) {
+          log(`Tweet ${tweet.id} too old/saturated — skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
         // Image tweets are detectable from the timeline card itself — skip
         // enqueueing (and thus opening) them entirely instead of paying for
         // a full open→detect→goBack cycle, mirroring the SKIP_IMAGE_TWEETS
@@ -216,6 +252,17 @@ async function main() {
         ) {
           log(`Tweet ${tweet.id} has image(s) (detected pre-open) — SKIP_IMAGE_TWEETS is on, skipping.`);
           markReplied(tweet.id);
+          continue;
+        }
+
+        // Low-priority handles (scoreTweet.ts) — don't engage yet. Park the
+        // URL in Redis and revisit it later once the real queue (everyone
+        // else) is completely empty, instead of competing for a queue slot now.
+        if (isLowPriority(tweet.author, tweet.username)) {
+          markNotificationSeen(tweet.id, tweet.url);
+          await deferLowPriorityTweet(tweet.url).catch(err =>
+            log(`Redis write failed for low-priority ${tweet.id}, continuing anyway: ${err}`)
+          );
           continue;
         }
 
@@ -246,12 +293,43 @@ async function main() {
       const remaining = progress.total - progress.replied;
       console.log(`📊 Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)`);
 
-      // If queue is empty after processing, scroll for more
+      // If queue is empty, pull in deferred low-priority tweets before
+      // scrolling for more — this is the "only reply to them once everyone
+      // else is done" moment.
       if (queueSize() === 0) {
-        log("Queue empty. Scrolling for more posts...");
-        const { scrollTimeline } = await import("./browser/scroll");
-        await scrollTimeline(page);
-        await page.waitForTimeout(2000);
+        const deferredUrls = await getDeferredLowPriorityTweets(3).catch(() => [] as string[]);
+
+        if (deferredUrls.length > 0) {
+          log(`Queue empty — pulling ${deferredUrls.length} deferred low-priority tweet(s).`);
+          for (const url of deferredUrls) {
+            // Claim it immediately so it isn't picked up again on the next
+            // cycle, regardless of whether this attempt ends up succeeding.
+            await clearLowPriorityTweet(url).catch(err =>
+              log(`Redis delete failed for deferred tweet, continuing anyway: ${err}`)
+            );
+
+            const id = url.match(/status\/(\d+)/)?.[1];
+            if (!id || hasReplied(id)) {
+              continue;
+            }
+            const author = url.match(/x\.com\/([^/]+)\/status/)?.[1];
+
+            enqueue({
+              id,
+              url,
+              author: author ? `@${author}` : "",
+              text: "",
+              createdAt: Date.now(),
+              status: "pending"
+            });
+          }
+          reRankQueue();
+        } else {
+          log("Queue empty. Scrolling for more posts...");
+          const { scrollTimeline } = await import("./browser/scroll");
+          await scrollTimeline(page);
+          await page.waitForTimeout(2000);
+        }
       }
 
     } catch (err) {
@@ -516,7 +594,15 @@ async function main() {
               }
             }
           } else {
-            // Use ChatGPT for other tweet types
+            // Use ChatGPT for other tweet types. Format-valid and non-duplicate
+            // isn't enough on its own — judge whether the draft is actually
+            // worth posting (adds insight, humor, etc., not just "I agree").
+            // Regenerate within the same 3-attempt budget if it isn't, and
+            // fall back to the best-scoring attempt if none clear the bar,
+            // rather than throwing away a slow ChatGPT round-trip entirely.
+            let bestReply = "";
+            let bestScore = -1;
+
             for (let i = 0; i < 3; i++) {
               try {
                 reply = await chatgpt.generateReply({
@@ -524,13 +610,33 @@ async function main() {
                   relationship: "stranger",
                   memories
                 });
-                if (validateReply(reply) && !isDuplicate(reply)) {
-                  break;
-                }
               } catch (err) {
                 log(`ChatGPT attempt ${i + 1} failed: ${err}`);
-                reply = ""; // Reset reply on error
+                reply = "";
+                continue;
               }
+
+              if (!validateReply(reply) || isDuplicate(reply)) {
+                reply = "";
+                continue;
+              }
+
+              const [judged] = await judgeReplies(tweetText, [reply]);
+              if (judged && judged.score > bestScore) {
+                bestReply = reply;
+                bestScore = judged.score;
+              }
+
+              if (judged?.worthPosting) {
+                break;
+              }
+              log(`ChatGPT attempt ${i + 1} not worth posting (${judged?.reason ?? "no reason"}) — regenerating.`);
+              reply = "";
+            }
+
+            if (!reply && bestReply) {
+              log(`No ChatGPT draft cleared the bar for ${item.id} — using best-effort fallback (score ${bestScore}).`);
+              reply = bestReply;
             }
           }
 
