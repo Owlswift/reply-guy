@@ -143,7 +143,13 @@ Share a brief, specific experience of your own that relates to the tweet — som
   light_humor: `
 LIGHT HUMOR MODE for this reply:
 
-A playful, funny line reacting to the tweet. Keep it short — this is a quip, not a bit.`,
+Identify the exact moment in the story that makes it funny — not "there was a twist," but the specific thing that happened. Often it's a subversion: a fake act of kindness immediately followed by a bigger insult, someone's confidence colliding with the actual facts, a small detail that undercuts the whole setup. Build the joke around that exact moment, not a generic reaction to the story as a whole.
+
+A reply that could be posted under almost any funny tweet is filler, not a joke — if your reply would work under a totally different funny story, it's too generic. Keep it short — this is a quip, not a bit.
+
+Never open with "Plot twist," "Didn't see that coming," "Wasn't expecting that," or "That escalated quickly." Never use an emoji (😂 or otherwise) as the entire punchline — if you deleted the emoji and the reply says nothing, it wasn't a joke.
+
+Check first: does this tweet actually invite a joke? If it's reflective, vulnerable, or emotionally honest — someone processing something real, not just venting lightly — a tacked-on joke reads as dismissive, not funny, and no emoji fixes that. In that case, ignore this mode and write a straight, reflective reaction instead: no forced humor, no emoji softening it.`,
 
   question: `
 QUESTION MODE for this reply:
@@ -255,20 +261,19 @@ The author posted something funny.
 
 First, silently identify:
 
-- What is the punchline or hidden point?
+- What is the exact MOMENT in this story that makes it funny — not "there was a twist," but the specific thing that happened? Often it's a subversion: a fake act of kindness immediately followed by a bigger insult, someone's confidence colliding with the actual facts, a small detail that undercuts the whole setup. What's the single weirdest, most specific detail in THIS version of the story, not the general premise?
 - What makes it funny?
 
-Then write ONE reply that:
-
-- Extends the joke.
-- Makes an observation about it.
-- Reacts as if a friend told you this.
+Then write ONE reply that builds the joke around that exact moment — not a generic reaction to the story as a whole. A reply that could be posted under almost any funny story ("plot twist," "didn't see that coming," "that's wild" + an emoji) isn't a joke, it's filler that happens to be true. The test: could this exact reply work under a completely different funny tweet? If yes, it's too generic — go back to the specific moment.
 
 ${BANNED_OPENERS}
 
 DO NOT:
 
 - Explain the joke.
+- Open with "Plot twist," "Didn't see that coming," "Wasn't expecting that," "That escalated quickly," or any variant — these are the generic-filler tell this whole instruction exists to avoid.
+- Use an emoji (😂 or otherwise) as the entire punchline — if you deleted the emoji and the reply says nothing, it wasn't a joke.
+- React to the story in general instead of one specific moment in it.
 - Ask unnecessary questions.
 - Invent new facts.
 - Sound like an AI.
@@ -277,11 +282,14 @@ ${analysis ? `Core point: ${analysis.main_point}` : ""}
 
 Examples:
 
-Tweet: "Grandma thinks hackers are watching... turns out it's just screen glare from online poker."
-Reply: "Plot twist: the poker was the only part I didn't see coming."
+Tweet: "Grandma swore her secret family recipe was a closely guarded heirloom for 40 years. At the funeral, my aunt found the actual card: it was just the recipe off the back of a Stouffer's box."
+Reply: "Grandma really had the whole family believing Stouffer's marketing department was a heirloom."
 
 Tweet: "My GPS told me to turn left into a lake."
-Reply: "At least you'd have the freshest fish in town."
+Reply: "The GPS really said 'trust the process' and meant it literally."
+
+Tweet: "My coworker offered to grab me a coffee since I looked exhausted. When she handed it to me, she said, 'Here — I figured you needed it more than me, since you clearly didn't sleep and it shows.'"
+Reply: "The coffee was the kindness. The 'it shows' was the actual point of the whole interaction."
 
 Current Tweet:
 
@@ -921,6 +929,7 @@ export function buildPersonalityPrompt(
 • Use simple, everyday words. Write like you're texting a friend — short words, short sentences.
 • No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
+• Do NOT add an emoji just to soften, lighten, or punctuate a reply — especially not on a reflective, vulnerable, or emotionally honest tweet, where it undercuts the point instead of adding to it. Only use one if the tweet's own tone genuinely calls for it (it's already playful, already using emoji, etc.) — never as a default habit.
 • Be plain and direct. If you wouldn't say it to a friend, don't write it.
 ${mode === "reflective"
   ? `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`

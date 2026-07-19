@@ -16,11 +16,72 @@ export interface ProfileVisitResult {
 // up on catching all the way up to lastSeenTweetId. Bounds the cost of a
 // single visit — if a handle posted more than this many originals since
 // the last check, we just take the newest ones and move on.
-const MAX_ARTICLES_TO_SCAN = 10;
+//
+// Reposts and pinned tweets don't count toward "found" or advance the
+// cursor, but they DO consume scan slots — a heavy reposter can put a
+// dozen+ reposts in a row before their next original post. Verified
+// live: one tracked account had 15 consecutive reposts before her next
+// original story. 25 gives real margin above that.
+const MAX_ARTICLES_TO_SCAN = 25;
+
+// X virtualizes the profile timeline — only articles near the current
+// scroll position are actually mounted in the DOM, regardless of
+// MAX_ARTICLES_TO_SCAN. Verified live: a fresh page load only had ~8
+// articles mounted; reaching article 15 required multiple scroll steps.
+// Bounds how many scroll attempts we'll make chasing MAX_ARTICLES_TO_SCAN.
+const MAX_SCROLL_STEPS = 15;
 
 // Same cutoff as the notification-based skip gate (scoreTweet.ts) — a post
 // this old isn't worth replying to regardless of source.
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+interface ArticleInfo {
+  isRepost: boolean;
+  isPinned: boolean;
+  isReply: boolean;
+  href: string;
+  id: string | null;
+  text: string;
+  datetime: string | null;
+}
+
+async function readArticle(article: ReturnType<Page["locator"]>): Promise<ArticleInfo> {
+  return article.evaluate((el: any) => {
+    const socialContext = (el.querySelector('[data-testid="socialContext"]')?.textContent ?? "").toLowerCase();
+    const isRepost = socialContext.includes("repost");
+    const isPinned = socialContext.includes("pinned");
+    const isReply = (el.textContent ?? "").trim().startsWith("Replying to");
+    const anchor = el.querySelector('a[href*="/status/"]');
+    const href = anchor?.getAttribute("href") ?? "";
+    const idMatch = href.match(/status\/(\d+)/);
+    const text = el.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? "";
+
+    // This tweet's own <time>, not a nested quote-tweet's — same
+    // role="link" heuristic as extractTweet.ts (an <a role="link">
+    // wraps this tweet's own timestamp; a <div role="link"> wraps a
+    // quote-card's).
+    const times: any[] = Array.from(el.querySelectorAll("time"));
+    let datetime: string | null = null;
+    for (const t of times) {
+      let node: any = t.parentElement;
+      let roleLinkTag: string | null = null;
+      while (node && node !== el) {
+        if (node.getAttribute("role") === "link") {
+          roleLinkTag = node.tagName;
+          break;
+        }
+        node = node.parentElement;
+      }
+      if (roleLinkTag === "A") {
+        datetime = t.getAttribute("datetime");
+        break;
+      }
+    }
+    if (!datetime) datetime = times[0]?.getAttribute("datetime") ?? null;
+
+    return { isRepost, isPinned, isReply, href, id: idMatch?.[1] ?? null, text, datetime };
+  });
+}
 
 /**
  * Visit a profile's Posts tab and collect original posts — not reposts,
@@ -38,6 +99,9 @@ const MAX_AGE_MS = 12 * 60 * 60 * 1000;
  * allowed to drive the lastSeenTweetId cursor, since its position (always
  * slot 0) doesn't reflect chronological order and using it as the cursor
  * would permanently block the scan on every future visit.
+ *
+ * Scrolls progressively while scanning — the timeline is virtualized, so
+ * articles beyond what's initially mounted only appear as you scroll.
  */
 export async function visitProfileForNewOriginals(
   page: Page,
@@ -56,101 +120,84 @@ export async function visitProfileForNewOriginals(
   }
   await page.waitForTimeout(1500);
 
-  const articles = await page.locator("article").all();
   const found: ProfileOriginalTweet[] = [];
+  const seenIds = new Set<string>();
   let newestTweetId: string | null = null;
+  let scannedCount = 0;
+  let stop = false;
+  let previousScrollY = -1;
 
-  for (let i = 0; i < Math.min(articles.length, MAX_ARTICLES_TO_SCAN); i++) {
-    const article = articles[i];
-    if (!article) break;
+  for (let step = 0; step < MAX_SCROLL_STEPS && !stop; step++) {
+    const articles = await page.locator("article").all();
 
-    const info = await article.evaluate((el: any) => {
-      const socialContext = (el.querySelector('[data-testid="socialContext"]')?.textContent ?? "").toLowerCase();
-      const isRepost = socialContext.includes("repost");
-      const isPinned = socialContext.includes("pinned");
-      const isReply = (el.textContent ?? "").trim().startsWith("Replying to");
-      const anchor = el.querySelector('a[href*="/status/"]');
-      const href = anchor?.getAttribute("href") ?? "";
-      const idMatch = href.match(/status\/(\d+)/);
-      const text = el.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? "";
+    for (const article of articles) {
+      if (stop) break;
 
-      // This tweet's own <time>, not a nested quote-tweet's — same
-      // role="link" heuristic as extractTweet.ts (an <a role="link">
-      // wraps this tweet's own timestamp; a <div role="link"> wraps a
-      // quote-card's).
-      const times: any[] = Array.from(el.querySelectorAll("time"));
-      let datetime: string | null = null;
-      for (const t of times) {
-        let node: any = t.parentElement;
-        let roleLinkTag: string | null = null;
-        while (node && node !== el) {
-          if (node.getAttribute("role") === "link") {
-            roleLinkTag = node.tagName;
-            break;
-          }
-          node = node.parentElement;
+      const info = await readArticle(article);
+      if (!info.id || seenIds.has(info.id)) continue;
+      seenIds.add(info.id);
+      scannedCount++;
+
+      // A pinned tweet sits at position 0 forever, regardless of when it
+      // was actually posted — it can be brand new or years old, and
+      // either way it does NOT reflect chronological order relative to
+      // what's below it. Reposts have the same problem (a years-old
+      // tweet can get reposted today). Only a genuine chronological post
+      // can safely be used as the "have I already scanned past
+      // everything new" cursor or trigger the age-based cutoff.
+      const isChronological = !info.isPinned && !info.isRepost;
+
+      if (isChronological) {
+        if (newestTweetId === null) {
+          newestTweetId = info.id;
         }
-        if (roleLinkTag === "A") {
-          datetime = t.getAttribute("datetime");
+        if (lastSeenTweetId && info.id === lastSeenTweetId) {
+          stop = true;
+          break;
+        }
+        if (info.datetime && Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS) {
+          // Profiles list posts newest-first, so once we hit a
+          // chronological one over 12hr old, everything after it (in
+          // chronological terms) is even older — stop.
+          stop = true;
           break;
         }
       }
-      if (!datetime) datetime = times[0]?.getAttribute("datetime") ?? null;
 
-      return { isRepost, isPinned, isReply, href, id: idMatch?.[1] ?? null, text, datetime };
-    });
+      if (!info.isRepost && !info.isReply && info.text) {
+        // Pinned tweets are judged on their own merits (just the age
+        // check) instead of being unconditionally skipped — a pin can be
+        // a genuinely fresh post the author wants visible.
+        const pinnedTooOld =
+          info.isPinned &&
+          (!info.datetime || Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS);
 
-    if (!info.id) continue;
-
-    // A pinned tweet sits at position 0 forever, regardless of when it was
-    // actually posted — it can be brand new or years old, and either way
-    // it does NOT reflect chronological order relative to what's below it.
-    // Reposts have the same problem (a years-old tweet can get reposted
-    // today). Only a genuine chronological post can safely be used as the
-    // "have I already scanned past everything new" cursor or trigger the
-    // age-based cutoff — using a pinned tweet's ID for that would poison
-    // the cursor permanently: every future visit would see article[0]
-    // match lastSeenTweetId (itself) and break before ever checking
-    // article[1] onward again.
-    const isChronological = !info.isPinned && !info.isRepost;
-
-    if (isChronological) {
-      if (newestTweetId === null) {
-        newestTweetId = info.id;
+        if (!pinnedTooOld) {
+          found.push({
+            id: info.id,
+            url: info.href.startsWith("http") ? info.href : `https://x.com${info.href.split("?")[0]}`,
+            text: info.text,
+            author: `@${handle}`,
+          });
+        }
       }
-      if (lastSeenTweetId && info.id === lastSeenTweetId) {
-        break;
-      }
-      if (info.datetime && Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS) {
-        // Profiles list posts newest-first, so once we hit a chronological
-        // one over 12hr old everything after it is even older — stop.
+
+      if (scannedCount >= MAX_ARTICLES_TO_SCAN) {
+        stop = true;
         break;
       }
     }
 
-    if (info.isRepost || info.isReply || !info.text) {
-      continue;
-    }
+    if (stop) break;
 
-    // Pinned tweets are judged on their own merits (just the age check)
-    // instead of being unconditionally skipped — a pin can be a genuinely
-    // fresh post the author wants visible, not just old evergreen content.
-    if (info.isPinned) {
-      const ageMs = info.datetime ? Date.now() - new Date(info.datetime).getTime() : Infinity;
-      if (ageMs > MAX_AGE_MS) {
-        continue;
-      }
-    }
-
-    found.push({
-      id: info.id,
-      url: info.href.startsWith("http") ? info.href : `https://x.com${info.href.split("?")[0]}`,
-      text: info.text,
-      author: `@${handle}`,
-    });
+    const scrollY = await page.evaluate(() => window.scrollY);
+    if (scrollY === previousScrollY) break; // reached the bottom, nothing more to load
+    previousScrollY = scrollY;
+    await page.evaluate(() => window.scrollBy(0, 1200));
+    await page.waitForTimeout(700);
   }
 
-  // found is newest-first (DOM/scan order); reverse so callers enqueue in
-  // the order the tweets were actually posted.
+  // found is newest-first (scan order); reverse so callers enqueue in the
+  // order the tweets were actually posted.
   return { newOriginals: found.reverse(), newestTweetId };
 }

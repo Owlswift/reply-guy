@@ -414,7 +414,7 @@ async function main() {
             continue;
           }
 
-          let details = await extractCurrentTweet(page);
+          const details = await extractCurrentTweet(page);
           if (!details) {
             log(`Cannot extract tweet ${item.id}. Skipping.`);
             markReplied(item.id);
@@ -576,25 +576,6 @@ async function main() {
             }
 
             log(`Passing image tweet ${item.id} to ChatGPT for an automated reply.`);
-          }
-
-          // A multi-part story thread can still be actively being posted
-          // when we first read it — a truncated read here means a
-          // truncated draft, since this is what actually gets sent to
-          // ChatGPT below. If the newest segment we found is very fresh,
-          // wait once and re-extract, using the fuller version if it
-          // grew. Skip entirely for single tweets or already-settled
-          // threads — this must not run after drafting, only before.
-          const isMultiPart = details.fullText.includes("\n\n");
-          const latestSegmentAgeMs = Date.now() - details.latestSegmentAt;
-          if (isMultiPart && latestSegmentAgeMs < 5 * 60_000) {
-            log(`Thread ${item.id} looks like it may still be posting — waiting to re-check.`);
-            await page.waitForTimeout(60_000);
-            const recheck = await extractCurrentTweet(page);
-            if (recheck && recheck.fullText.length > details.fullText.length) {
-              log(`Thread ${item.id} grew while waiting — using the fuller version.`);
-              details = recheck;
-            }
           }
 
           // Reading time — scales with fatigue

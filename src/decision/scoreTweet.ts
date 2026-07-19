@@ -33,8 +33,8 @@ const PRIORITY_HANDLES: string[] = [
   "@lizzkelly7",
   "@onjolo_kenya",
   "@6th_july",
-  "@Fun_Trades1",
-  "@RiddleSphere"
+  "@RiddleSphere",
+  "@Drew_Scarlet98"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -68,7 +68,13 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@FitWithDrSam",
   "@ManhoodDecoded",
   "@TheManOfNuances",
-  "@JeremyTate41"
+  "@JeremyTate41",
+  "@beemyli",
+  "@SilkNHeels",
+  "@Laineytales",
+  "@iamsofias_",
+  "@JainalMomin",
+  "@katyakayy"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -101,6 +107,7 @@ export const LOW_PRIORITY_HANDLES: string[] = [
   "@maamblaq_trade",
   "@KeruboSk",
   "@Anietie_bassey1",
+  "@Fun_Trades1",
   "@LEGACE_FX"
 ];
 
