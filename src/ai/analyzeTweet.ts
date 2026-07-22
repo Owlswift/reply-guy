@@ -16,11 +16,7 @@ export interface TweetAnalysis {
  * Analyze a tweet to understand its structure and intent.
  * Uses the model for deeper understanding of tone and reply strategy.
  */
-export async function analyzeTweet(tweet: string, category?: string): Promise<TweetAnalysis> {
-  const categoryHint = category && category !== "general"
-    ? `\nKeyword classification: ${category}`
-    : "";
-
+export async function analyzeTweet(tweet: string): Promise<TweetAnalysis> {
   const response = await ollama.chat({
     model: "gpt-oss:20b",
     options: {
@@ -43,7 +39,7 @@ Output ONLY valid JSON with this structure:
 
 Rules:
 
-- type: what category best fits this tweet (use ${category || "general"} as hint if provided)
+- type: judge this from the tweet's actual STRUCTURE, not just the topic it happens to mention. If the tweet narrates a sequence of events as an anecdote — something happened, then something else happened, building toward an ending or a punchline — it's "story", even if the subject matter is a job, politics, sports, etc. Do NOT classify a narrated anecdote as "career"/"politics"/"sports" just because it mentions a job, a politician, or a game — only use those categories when the tweet is stating an opinion, take, or fact about that topic, not telling a story about it.
 - tone: the emotional tone
 - main_point: the actual message, joke, or hidden point — be specific
 - best_reply_style: how to reply:
@@ -56,7 +52,7 @@ Rules:
       },
       {
         role: "user",
-        content: `Tweet: ${tweet}${categoryHint}`
+        content: `Tweet: ${tweet}`
       }
     ]
   });

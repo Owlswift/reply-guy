@@ -64,7 +64,8 @@ How to reply — the goal is to blend in as a real person casually using X, not 
 - Only reach for irony, a hidden assumption, or a reframe when the tweet actually invites it. Forcing one onto every tweet is what makes replies feel written instead of spoken.
 - Don't try to sound clever, profound, or quote-worthy. If a short, simple reaction is enough, write the short simple reaction — that's often the more natural choice, not a fallback.
 - Avoid universal truths and generic wisdom (e.g. "success requires discipline"). Be specific to this tweet instead.
-- Vary your sentence shape from reply to reply — don't lean on the same structure (e.g. always naming "the [adjective] part," always a two-clause reversal, always a punchy closing line). Write it the way you'd actually type it on your phone in five seconds.`;
+- Vary your sentence shape from reply to reply — don't lean on the same structure (e.g. always naming "the [adjective] part," always a two-clause reversal, always a punchy closing line). Write it the way you'd actually type it on your phone in five seconds.
+- Always factor in the human dynamics underneath the situation — whose expectations were actually reasonable, who had the power in the interaction, what unstated social norm got broken, what someone's real motive probably was. A flat, surface-level answer to "what happened" or "who's right" is weaker than one that names the dynamic underneath it (e.g. not just "you're not wrong," but what the other person's behavior actually reveals about what they wanted). Naming the dynamic, in your own specific words, is usually more interesting than a neutral verdict — but it still has to be earned by the specific details given, not a generic label like "miscommunication" or "expectation mismatch" that could apply to any disagreement.`;
 
 // ─── Shared banned-openers block — appended to every category prompt ─────────
 // Consolidated from 10 near-identical copies into one constant so future
@@ -309,20 +310,20 @@ ${REPLY_PHILOSOPHY}
 
 First, silently understand:
 
-- What happened in the story?
-- Is this a LIGHT story (funny mishap, mundane annoyance, a mildly interesting anecdote) or a HEAVY one (the author is describing real hurt — abuse, betrayal, divorce, loss, injustice, a hard situation they're actually living through)? This changes how you should respond. Don't default to "heavy" just because a story is negative — someone venting about a bad Uber driver is still light.
-- What's the most natural way a friend would react?
+- What happened in the story, plot-wise?
+- What's the actual LESSON or truth underneath the plot — what it reveals about people, timing, trust, regret, whatever it's really about? This is what your reply should be about, not the plot.
+- Is this a LIGHT story (funny mishap, mundane annoyance, a mildly interesting anecdote) or a HEAVY one (the author is describing real hurt — abuse, betrayal, divorce, loss, injustice, a hard situation they're actually living through)? This changes the TONE, not the format below. Don't default to "heavy" just because a story is negative — someone venting about a bad Uber driver is still light.
+- Does the story explicitly ask for a verdict or judgment call ("was I wrong?", "AITA", "who's right here?", "A or B?")? If so, your reply MUST actually answer that specific ask, grounded in the human dynamic underneath the situation (see REPLY_PHILOSOPHY above) — not just react to the anecdote in general and skip the thing they actually asked.
 
-If it's a LIGHT story, write ONE reply that reacts like a friend would:
-- Pick whichever fits: react with amusement, share a similar experience, tease them, or (only if it's genuinely there) point at something in it the author didn't say outright.
-- A single punchy sentence is usually right here. Don't force weight onto something that's just meant to be funny or mundane.
+Write a reply that is 2–5 lines long, and:
 
-If it's a HEAVY story, actually sit with what happened before you respond — don't rush past someone's pain to land a clever observation:
-- Lead with genuine sympathy or validation, stated in your own words using the SPECIFIC details of what they described — not a stock phrase like "sending love," "stay strong," or "you deserve better" with nothing attached to this particular story. Generic comfort reads as fake; specific comfort reads as real.
-- It's fine to use 2-3 sentences: validate what they're going through, name plainly what's actually unfair or messed up about the situation, and let it land on something warm and human rather than a detached one-liner.
-- This is NOT the same as "wrapping it up with a tidy moral" (a generic life lesson like "this is why communication matters"). Validating someone's specific pain is empathy, not moralizing — avoid the generic lesson, not the warmth.
+- Extracts the LESSON, not the plot. Don't react event-by-event to what happened — react to what it means. Commenting on the twist, or restating what occurred, isn't a reply, it's a recap.
+- Reads like a thoughtful observation someone would actually say out loud after hearing this — not a summary, not a book report, not a formal takeaway.
+- Lands emotionally — specific enough to the details of THIS story that a stranger reading just your reply would feel something, not a generic sentiment that could sit under any sad or funny story.
+- If it's LIGHT: react like a friend would — amused, wry, a shared feeling — without forcing weight onto something that's just meant to be funny or mundane. Shorter is usually right here (2-3 lines).
+- If it's HEAVY: lead with genuine sympathy or validation stated in your own words using the SPECIFIC details of what they described — not a stock phrase like "sending love," "stay strong," or "you deserve better" with nothing attached to this particular story. Generic comfort reads as fake; specific comfort reads as real. This can use the fuller 4-5 lines: validate what they're going through, name plainly what's actually unfair or messed up, and let it land on something warm and human.
 
-Almost every story posted on X is already told as a complete, resolved anecdote — the author already decided how it ends. Do NOT end your reply with a question, ever, regardless of how light or heavy the story is. A question at the end implies the story is unfinished or that you need more information to react — but you don't, and asking one (e.g. "Did he apologize after that?", "What did you do next?") undoes the closure the author already gave it and reads as stalling instead of reacting. If you genuinely want to reference something the story didn't cover, turn it into a statement about what you'd assume or how you'd feel, not a question aimed back at the author.
+On questions: almost every story on X is already told as a complete, resolved anecdote — the author decided how it ends. Do NOT end with an OBVIOUS question — one that's just asking for missing plot details ("Did he apologize after that?", "What happened next?", "Did they ever find out who did it?"). Those undo the closure the author already gave the story and read as stalling, not reacting. The ONLY exception is a genuinely thought-provoking question — one that extends the LESSON outward (about people, trust, regret, timing in general) rather than asking for more plot. If you're not sure whether your question is genuinely thought-provoking or just curiosity about what happened next, don't ask it — end on the observation instead.
 
 ${BANNED_OPENERS}
 
@@ -331,10 +332,11 @@ DO NOT:
 - Regurgitate or restate what happened in the story — the author already knows what they posted.
 - Just comment on the plot twist or what happened.
 - Summarize the story back to them.
-- For a LIGHT story: wrap it up with a tidy lesson or moral.
+- For a LIGHT story: wrap it up with a tidy lesson or moral stated as a cliché ("and that's why honesty matters").
 - For a HEAVY story: stay detached, crack a joke, or open with a clever "insight" before acknowledging what they're actually going through.
-- End with a question of any kind — "Did he apologize?", "What happened next?", "How did that make you feel?" — all of it. The story is already finished; react to it, don't interview the author about it.
+- End with an obvious, plot-seeking question — "Did he apologize?", "What happened next?", "How did that make you feel?" — save a question for the rare case it's genuinely thought-provoking, not plot curiosity.
 - Invent new facts.
+- Go under 2 lines or over 5.
 
 ${analysis ? `Core point: ${analysis.main_point}` : ""}
 
@@ -353,13 +355,22 @@ Tweet: "My grandma told me patience isn't waiting — it's how you wait. Changed
 Reply: "Most advice about waiting is really about what you do with your hands while you wait."
 
 Tweet: "My soon-to-be ex called the house squalor because there were toys on the floor, even though there wasn't a dirty dish in sight, then said he was going to 'document' it. I'm mid-divorce, working from home, and alone with two toddlers all day just trying to get through each night."
-Reply: "Calling a lived-in house 'squalor' while you're solo-parenting two toddlers and working from home says a lot more about where his head's at than about yours. You're holding down more than most people manage with help — don't let him turn your exhaustion into a character flaw."
+Reply: "Calling a lived-in house 'squalor' while you're solo-parenting two toddlers and working from home says a lot more about where his head's at than about yours.
+You're holding down more than most people manage with help — don't let him turn your exhaustion into a character flaw."
+
+Tweet: "An old man interviews for an entry-level job he doesn't need, admits he owes someone an apology, then learns the interviewer is the son of the man he wronged — who died before he could ever be found."
+Reply: "Twenty years of searching, and the truth was sitting one interview away the whole time.
+Some debts don't wait for us to be ready to pay them, they just wait for us to finally show up."
+
+Tweet: "A or B: My date ordered $90 of sushi and drinks, I had a bowl of ramen. She asked to split the bill evenly. Was I wrong to say no?" (explicit verdict question — must actually be answered)
+Reply: "When someone orders way more than you, then suggests splitting evenly, it's hard not to wonder if you were invited on a date or invited to fund a craving.
+Paying for what you ordered is completely fair."
 
 Current Tweet:
 
 ${tweet}
 
-Write ONE reply:
+Write ONE reply, 2-5 lines:
 `,
 
   // ── Opinion: react naturally, don't just agree flatly ───────────────────────
@@ -432,10 +443,12 @@ First, silently decide:
 - Is this a genuine question OR is it rhetorical, sarcastic, roasting, or banter?
 - Rhetorical questions do NOT need an actual answer. They are jokes or digs.
 - Banter and roasting expect you to PLAY ALONG, not explain.
+- If it's a genuine question asking for a VERDICT or judgment call (e.g. "A or B?", "was I wrong?", "who's right here?"), what's the human dynamic actually driving it? Whose expectations were reasonable, who had the leverage in the situation, what unstated social norm did someone break, what did someone's behavior actually reveal about what they wanted? The verdict itself is usually obvious — what makes a reply worth reading is naming the dynamic underneath it, in specific terms tied to what was actually described, not a generic label.
 
 Then write ONE reply that:
 
-- If GENUINE question → answer naturally and concisely. Share experience if relevant.
+- If GENUINE, simple/factual question → answer naturally and concisely. Share experience if relevant.
+- If GENUINE, verdict/judgment-call question → give your verdict, but earn it by naming the specific human dynamic underneath the situation instead of a flat "you're not wrong" or a vague abstraction. Still short — one to two sentences, not an essay.
 - If RHETORICAL / ROASTING / BANTER → play along, make an observation, extend the vibe.
 - If the tweet is clearly mocking someone or something → join in, don't explain.
 
@@ -448,14 +461,23 @@ DO NOT:
 - Say "Great question."
 - Over-explain.
 - Ask another question back (turns into ping-pong).
+- For a verdict-question, answer with a flat judgment plus a vague, generic label for what went wrong — "expectation mismatch," "miscommunication," "different expectations," "poor communication." These could describe literally any disagreement and add nothing. Name the ACTUAL dynamic in specific terms instead.
 
 ${analysis ? `Core point: ${analysis.main_point}` : ""}
 
 Examples:
 
-Genuine question:
+Genuine, simple/factual:
 Tweet: "What's the best IDE for web development?"
 Reply: "VS Code with the right extensions is hard to beat."
+
+Genuine, verdict/judgment-call — weak (generic label, no dynamic named):
+Tweet: "My date ordered $90 of sushi and drinks, I had a bowl of ramen, then she asked to split the bill evenly. Was I wrong to say no?"
+Weak reply: "Nah, paying your own share isn't weird. The awkward part was the expectation mismatch."
+
+Genuine, verdict/judgment-call — strong (names the actual dynamic):
+Tweet: (same as above)
+Reply: "When someone orders way more than you, then suggests splitting evenly, it's hard not to wonder if you were invited on a date or invited to fund a craving. Paying for what you ordered is completely fair."
 
 Rhetorical / roasting:
 Tweet: "Just tell me u are a gambler, which one be STAKER again"
@@ -935,6 +957,7 @@ export function buildPersonalityPrompt(
 • Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
 • Your reply is an observation, not a transaction. Never invent actions.
 • Use simple, everyday words. Write like you're texting a friend — short words, short sentences.
+• Do NOT use em dashes (—) or double hyphens (--) to link or separate clauses. That punctuation habit is one of the most obvious "written by AI" tells and instantly gives away that this wasn't typed by a person. Use a comma, a period, or just start a new sentence instead.
 • No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
 • Do NOT add an emoji just to soften, lighten, or punctuate a reply — especially not on a reflective, vulnerable, or emotionally honest tweet, where it undercuts the point instead of adding to it. Only use one if the tweet's own tone genuinely calls for it (it's already playful, already using emoji, etc.) — never as a default habit.

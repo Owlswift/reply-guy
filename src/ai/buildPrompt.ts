@@ -19,17 +19,26 @@ export interface PromptResult {
 
 export async function buildPrompt(input: PromptInput): Promise<PromptResult> {
     // Step 1: Keyword-based classification (fast, no model call)
-    const category = classifyTweet(input.tweet);
+    const keywordCategory = classifyTweet(input.tweet);
 
     // Step 2: For non-trivial types, get deeper analysis from the model
     let analysis: TweetAnalysis | undefined;
-    if (category !== "well_wish" && category !== "greeting") {
+    if (keywordCategory !== "well_wish" && keywordCategory !== "greeting") {
         try {
-            analysis = await analyzeTweet(input.tweet, category);
+            analysis = await analyzeTweet(input.tweet);
         } catch {
             // Model analysis is optional — fall back to keyword-only
         }
     }
+
+    // The keyword classifier is shallow — a single incidental word (e.g.
+    // "job"/"interview" inside a multi-paragraph workplace anecdote) can
+    // misfile an actual story as "career" and skip every story-specific
+    // rule (like never ending a reply with a question), even though the
+    // tweet is clearly a narrative once you actually read it. The
+    // model's own classification understands structure, not just
+    // keywords, so prefer it once it's available.
+    const category = analysis?.type ?? keywordCategory;
 
     // Step 3: Build the prompt using category + analysis
     const prompt = buildPersonalityPrompt(

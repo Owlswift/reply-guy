@@ -6,6 +6,13 @@ export function validateReply(reply: string): boolean {
   if (trimmed.length < 5) return false;
   if (trimmed.length > 270) return false;
 
+  // Em dashes (and double-hyphens used the same way) are one of the most
+  // recognizable "written by AI" tells and instantly give away that a
+  // reply wasn't typed by a person. The prompt already asks the model not
+  // to use them, but that's not reliably followed — reject and force a
+  // regeneration instead of trusting the instruction alone.
+  if (trimmed.includes("—") || /\w\s--\s\w/.test(trimmed)) return false;
+
   // Reject HTML tags (indicates error page or malformed response)
   if (trimmed.includes('<div') || trimmed.includes('<span') || trimmed.includes('<html') || 
       trimmed.includes('<body') || trimmed.includes('<h1') || trimmed.includes('<h2')) {

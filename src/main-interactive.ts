@@ -903,7 +903,7 @@ async function main() {
           // PHASE 4b: AUTO-POST (ChatGPT draft)
           // ============================================================
           log(`=== AUTO-POST (ChatGPT) ===`);
-          console.log(`\n${chalk.green("🤖 ChatGPT draft for @" + (details.handle || item.author))}:\n`);
+          console.log(`\n${chalk.green("🤖 ChatGPT draft for @" + (details.handle || item.author).replace(/^@/, ""))}:\n`);
           console.log(chalk.yellow(`   ┌─ Tweet ─────────────────────────────────────`));
           console.log(chalk.yellow(`   │ ${tweetText}`));
           console.log(chalk.green(`   ├─ Draft ─────────────────────────────────────`));
