@@ -10,6 +10,17 @@ const ALWAYS_CHATGPT_HANDLES: string[] = [
   "@EricLDaugh"
 ];
 
+/**
+ * Handles listed here always pause for an operator decision before any
+ * reply is drafted — answer it myself, pass to ChatGPT, or skip. This
+ * overrides the image gate and the ChatGPT/manual tweetType branch alike.
+ * A "skip" choice is remembered per-tweet (storage/operatorSkippedTweets.ts)
+ * so the same post is never re-prompted.
+ */
+const ALWAYS_PROMPT_HANDLES: string[] = [
+  "@katyakayy"
+];
+
 function normalize(handle: string): string {
   return handle.replace(/^@/, "").toLowerCase();
 }
@@ -17,4 +28,9 @@ function normalize(handle: string): string {
 export function alwaysSendToChatGPT(handle: string): boolean {
   const normalized = normalize(handle);
   return ALWAYS_CHATGPT_HANDLES.some(h => normalize(h) === normalized);
+}
+
+export function alwaysPromptBeforeReply(handle: string): boolean {
+  const normalized = normalize(handle);
+  return ALWAYS_PROMPT_HANDLES.some(h => normalize(h) === normalized);
 }

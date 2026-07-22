@@ -23,4 +23,8 @@ export interface TimelineTweet {
   source: TweetSourceType;
   createdAt: Date;
   hasImage?: boolean;
+  isReply?: boolean;
+  replyingToHandle?: string;
+  isRepost?: boolean;
+  isPinned?: boolean;
 }

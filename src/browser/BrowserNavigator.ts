@@ -115,16 +115,19 @@ export class BrowserNavigator {
   }
 
   /**
-   * Navigate to the filtered posts timeline
+   * Navigate to the filtered posts timeline.
+   *
+   * X rejects/aborts a direct goto("/i/timeline") outright (ERR_ABORTED) —
+   * this used to do exactly that and would loop forever failing every 5s
+   * whenever refreshSession() called it. Go through /notifications and
+   * click the "New post notifications for..." card instead, exactly like
+   * openNotificationFeed() and returnToTimeline() already do.
    */
   async navigateToTimeline(): Promise<void> {
     this.assertNoActiveSession();
-    
-    log("[Navigator] Navigating to i/timeline");
-    await this.page.goto("https://x.com/i/timeline", { 
-      waitUntil: "domcontentloaded",
-      timeout: 15000 
-    });
+
+    log("[Navigator] Navigating to notifications (i/timeline direct goto is rejected by X)");
+    await this.goToNotificationFeedDirect();
 
     // Wait for articles to render — don't wait for networkidle because
     // X.com maintains persistent WebSocket connections for real-time feed

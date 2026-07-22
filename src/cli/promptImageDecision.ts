@@ -1,11 +1,12 @@
-import prompts from "prompts";
 import chalk from "chalk";
+import { selectWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
 
-export type ImageDecision = "myself" | "chatgpt";
+export type ImageDecision = "myself" | "chatgpt" | "skip";
 
 /**
  * Ask the operator how to handle a tweet that contains image(s) —
  * images carry context an LLM can misread, so this is a manual gate.
+ * Skips automatically if there's no answer within PROMPT_TIMEOUT_MS.
  */
 export async function promptImageDecision(
   author: string,
@@ -14,18 +15,14 @@ export async function promptImageDecision(
 ): Promise<ImageDecision> {
   console.log(chalk.magenta(`\n🖼️  Tweet from @${author} has ${imageCount} image(s):`));
   console.log(chalk.yellow(`   "${tweetText}"\n`));
+  console.log(chalk.dim(`   (no answer in ${PROMPT_TIMEOUT_MS / 1000}s — skipping automatically)`));
 
-  const response = await prompts({
-    type: "select",
-    name: "choice",
-    message: "How do you want to handle this tweet?",
-    choices: [
+  return selectWithTimeout<ImageDecision>(
+    "How do you want to handle this tweet?",
+    [
       { title: "Answer it myself", value: "myself" },
       { title: "Pass to ChatGPT", value: "chatgpt" }
     ],
-    initial: 0
-  });
-
-  // If the prompt is cancelled (e.g. Ctrl+C), default to the safer manual path
-  return (response.choice as ImageDecision) ?? "myself";
+    "skip"
+  );
 }

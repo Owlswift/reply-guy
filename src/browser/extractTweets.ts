@@ -54,6 +54,15 @@ export async function extractTweets(
         );
 
         return topLevelArticles.map((article) => {
+            // "X reposted"/"Pinned" label (same signal visitProfile.ts's
+            // isRepost/isPinned use). Reposts of your OWN already-replied
+            // content resurface here as a fresh-looking notification/timeline
+            // entry with the *same* underlying tweet id — without this,
+            // that resurfacing looks like a brand-new post to reply to.
+            const socialContext = (article.querySelector('[data-testid="socialContext"]')?.textContent ?? "").toLowerCase();
+            const isRepost = socialContext.includes("repost");
+            const isPinned = socialContext.includes("pinned");
+
             const author =
                 article.querySelector('[data-testid="User-Name"]')?.textContent?.trim() ?? "";
 
@@ -87,6 +96,33 @@ export async function extractTweets(
             // once a tweet is opened, so we can filter image tweets out
             // before ever navigating to them.
             const hasImage = !!article.querySelector('[data-testid="tweetPhoto"]');
+
+            // Detect "Replying to @X" (same signal visitProfile.ts's isReply
+            // uses). This catches both genuine replies and, more relevantly
+            // here, self-thread continuations: X surfaces each part of a
+            // multi-tweet thread as its own top-level article with its own
+            // tweet id, even though it's really a continuation of an
+            // earlier story rather than a fresh one. Find the innermost
+            // (shortest) matching element rather than the whole article —
+            // every ancestor of the "Replying to" line also starts with
+            // that text since it's a prefix of the article's full text.
+            const isReply = (article.textContent ?? "").trim().startsWith("Replying to");
+            let replyingToHandle = "";
+            if (isReply) {
+                const candidates = Array.from(article.querySelectorAll("div, span")) as any[];
+                let tightest: any = null;
+                let tightestLen = Infinity;
+                for (const c of candidates) {
+                    const t = (c.textContent ?? "").trim();
+                    if (t.startsWith("Replying to") && t.length < 150 && t.length < tightestLen) {
+                        tightest = c;
+                        tightestLen = t.length;
+                    }
+                }
+                const replyAnchor = tightest?.querySelector('a[href^="/"]');
+                const replyHref = replyAnchor?.getAttribute("href") ?? "";
+                replyingToHandle = replyHref.replace(/^\//, "").split("/")[0] ?? "";
+            }
 
             // Extract timestamp. When this tweet quote-tweets or previews
             // another one, the article contains two <time> elements and
@@ -135,7 +171,11 @@ export async function extractTweets(
                 reposts,
                 source,
                 createdAt,
-                hasImage
+                hasImage,
+                isReply,
+                isRepost,
+                isPinned,
+                ...(replyingToHandle ? { replyingToHandle } : {})
             };
         });
     }, source);

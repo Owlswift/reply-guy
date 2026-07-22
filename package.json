@@ -9,6 +9,7 @@
     "start:runner": "tsx src/runner.ts",
     "start:interactive": "tsx src/main-interactive.ts",
     "start:interactive:watch": "bash scripts/watch-and-restart.sh",
+    "catchup:priority": "tsx src/catchupPriorityHandles.ts",
     "ensure-running": "bash scripts/ensure-running.sh",
     "setup": "bash scripts/setup.sh",
     "build": "tsc",

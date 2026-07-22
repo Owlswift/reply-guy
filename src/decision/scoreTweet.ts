@@ -34,7 +34,8 @@ const PRIORITY_HANDLES: string[] = [
   "@onjolo_kenya",
   "@6th_july",
   "@RiddleSphere",
-  "@Drew_Scarlet98"
+  "@Drew_Scarlet98",
+  "@cutelipsxx"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles
@@ -50,7 +51,10 @@ const URGENT_HANDLES: string[] = [
   "@badger69420",
   "piersmorgan",
   "AlexHormozi",
-  "@gumvape"
+  "@gumvape",
+  "@rachcorrine",
+  "@SIGMAPROFESSOR",
+  "@YourPrimePath"
 ];
 
 const URGENT_BONUS = 1000; // massive score boost for urgent handles
@@ -64,17 +68,18 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@kemi_adeleke1",
   "@bluewdrift",
   "@WrittenBy_SS",
-  "@Mario_Sneh",
   "@FitWithDrSam",
-  "@ManhoodDecoded",
-  "@TheManOfNuances",
   "@JeremyTate41",
   "@beemyli",
   "@SilkNHeels",
   "@Laineytales",
   "@iamsofias_",
   "@JainalMomin",
-  "@katyakayy"
+  "@katyakayy",
+  "@artfuIchaos",
+  "@PathOfMen_",
+  "@Laiiyylaa",
+  "@ErikDavis"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -86,7 +91,7 @@ const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always rank
  * (top-priority, urgent, everything else) is completely empty.
  */
 export const LOW_PRIORITY_HANDLES: string[] = [
-  "@brotherhood__33",
+    "@brotherhood__33",
   "@O1Txtx",
   "@FablosJanny",
   "@cyrilhustle",
@@ -108,8 +113,47 @@ export const LOW_PRIORITY_HANDLES: string[] = [
   "@KeruboSk",
   "@Anietie_bassey1",
   "@Fun_Trades1",
-  "@LEGACE_FX"
+  "@LEGACE_FX",
+  "@ArunaSegun26525",
+  "@classiceluwa",
+  "@Iam_Jay77",
+  "@Shasam_Fx",
+  "@Headsup01",
+  "@2skidcrypto",
+  "@Easyboy024",
+  "@raixdaily",
+  "@The_IQTrader",
+  "@kanishkaansh",
+  "@cyrilhustle",
+  "@CryptBella1",
+  "@bobbthetrader",
+  "@GTgiftie",
+  "@Bagchaser3310",
+  "@CharleyT60280",
+  "@D_Joshuas",
+  "@Trader_Ashman"
+]
+
+/**
+ * Blocked handles — tweets from these authors are never scored, enqueued,
+ * or replied to. They're skipped outright, taking precedence over every
+ * other handle list (priority/urgent/top-priority included).
+ */
+export const BLOCKED_HANDLES: string[] = [
+  "@Mario_Sneh",
+  "@unfairleverage"
 ];
+
+/**
+ * Check if the author is a blocked handle.
+ */
+export function isBlockedHandle(author: string, username: string): boolean {
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
+  return BLOCKED_HANDLES.some(
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
+  );
+}
 
 /**
  * Check if the author is a low-priority handle.
@@ -221,14 +265,21 @@ export function isUrgent(author: string, username: string): boolean {
 }
 
 /**
- * Check if the author is a priority handle and return bonus.
+ * Check if the author is a priority handle (PRIORITY_HANDLES).
  */
-function priorityBonus(author: string, username: string): number {
+export function isPriority(author: string, username: string): boolean {
   const normalized = normalizeHandle(author);
   const normalizedUser = normalizeHandle(username);
   return PRIORITY_HANDLES.some(
     h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
-  ) ? PRIORITY_BONUS : 0;
+  );
+}
+
+/**
+ * Check if the author is a priority handle and return bonus.
+ */
+function priorityBonus(author: string, username: string): number {
+  return isPriority(author, username) ? PRIORITY_BONUS : 0;
 }
 
 /**

@@ -13,9 +13,9 @@ export interface ProfileVisitResult {
 }
 
 // How many articles from the top of the profile to inspect before giving
-// up on catching all the way up to lastSeenTweetId. Bounds the cost of a
-// single visit — if a handle posted more than this many originals since
-// the last check, we just take the newest ones and move on.
+// up. Bounds the cost of a single visit — if a handle posted more than
+// this many originals since the last check, we just take the newest ones
+// and move on.
 //
 // Reposts and pinned tweets don't count toward "found" or advance the
 // cursor, but they DO consume scan slots — a heavy reposter can put a
@@ -83,40 +83,48 @@ async function readArticle(article: ReturnType<Page["locator"]>): Promise<Articl
   });
 }
 
+interface ScanOptions {
+  maxArticles: number;
+  maxAgeMs: number;
+  // If set, stop (without including it) once a chronological article with
+  // this id is reached — the periodic "what's new since last check" case.
+  // If null, scan every chronological article within maxAgeMs regardless
+  // of a cursor — the "catch up on anything within this window" case.
+  stopAtId: string | null;
+}
+
 /**
- * Visit a profile's Posts tab and collect original posts — not reposts,
- * not replies, and not stale pins — newer than lastSeenTweetId.
+ * Shared scan loop: scroll progressively through a profile's Posts tab,
+ * classifying each article (repost/pinned/reply/original) and collecting
+ * originals per the given options. Reposts and pinned tweets are
+ * identified by X's own [data-testid="socialContext"] label ("X
+ * reposted", "Pinned"), verified against a live profile. Replies-to-others
+ * don't appear on the default Posts tab at all, so no separate reply
+ * check is needed there — only a defensive check for a self-thread
+ * continuation showing "Replying to".
  *
- * Reposts and pinned tweets are identified by X's own
- * [data-testid="socialContext"] label ("X reposted", "Pinned"), verified
- * against a live profile. Replies-to-others don't appear on the default
- * Posts tab at all, so no separate reply check is needed there — only a
- * defensive check for a self-thread continuation showing "Replying to".
- *
- * A pinned tweet is included if it's actually fresh (under the age cutoff)
- * rather than always skipped — pinning doesn't imply "old evergreen post,"
- * an author can pin something they posted an hour ago. It's just never
- * allowed to drive the lastSeenTweetId cursor, since its position (always
- * slot 0) doesn't reflect chronological order and using it as the cursor
- * would permanently block the scan on every future visit.
+ * A pinned tweet is included if it's actually fresh (under maxAgeMs)
+ * rather than always skipped — pinning doesn't imply "old evergreen
+ * post," an author can pin something they posted an hour ago. It's just
+ * never allowed to drive the cursor/age-cutoff decisions, since its
+ * position (always slot 0) doesn't reflect chronological order and using
+ * it for that would permanently block the scan on every future visit.
  *
  * Scrolls progressively while scanning — the timeline is virtualized, so
  * articles beyond what's initially mounted only appear as you scroll.
  */
-export async function visitProfileForNewOriginals(
+async function scanProfile(
   page: Page,
-  username: string,
-  lastSeenTweetId: string | null
-): Promise<ProfileVisitResult> {
-  const handle = username.replace(/^@/, "");
-
+  handle: string,
+  options: ScanOptions
+): Promise<{ found: ProfileOriginalTweet[]; newestTweetId: string | null }> {
   await page.goto(`https://x.com/${handle}`, { waitUntil: "domcontentloaded" });
 
   try {
     await page.waitForSelector("article", { timeout: 10_000 });
   } catch {
     // Empty/suspended/rate-limited profile — nothing to do this cycle.
-    return { newOriginals: [], newestTweetId: null };
+    return { found: [], newestTweetId: null };
   }
   await page.waitForTimeout(1500);
 
@@ -138,27 +146,20 @@ export async function visitProfileForNewOriginals(
       seenIds.add(info.id);
       scannedCount++;
 
-      // A pinned tweet sits at position 0 forever, regardless of when it
-      // was actually posted — it can be brand new or years old, and
-      // either way it does NOT reflect chronological order relative to
-      // what's below it. Reposts have the same problem (a years-old
-      // tweet can get reposted today). Only a genuine chronological post
-      // can safely be used as the "have I already scanned past
-      // everything new" cursor or trigger the age-based cutoff.
       const isChronological = !info.isPinned && !info.isRepost;
 
       if (isChronological) {
         if (newestTweetId === null) {
           newestTweetId = info.id;
         }
-        if (lastSeenTweetId && info.id === lastSeenTweetId) {
+        if (options.stopAtId && info.id === options.stopAtId) {
           stop = true;
           break;
         }
-        if (info.datetime && Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS) {
+        if (info.datetime && Date.now() - new Date(info.datetime).getTime() > options.maxAgeMs) {
           // Profiles list posts newest-first, so once we hit a
-          // chronological one over 12hr old, everything after it (in
-          // chronological terms) is even older — stop.
+          // chronological one over the age limit, everything after it
+          // (in chronological terms) is even older — stop.
           stop = true;
           break;
         }
@@ -170,7 +171,7 @@ export async function visitProfileForNewOriginals(
         // a genuinely fresh post the author wants visible.
         const pinnedTooOld =
           info.isPinned &&
-          (!info.datetime || Date.now() - new Date(info.datetime).getTime() > MAX_AGE_MS);
+          (!info.datetime || Date.now() - new Date(info.datetime).getTime() > options.maxAgeMs);
 
         if (!pinnedTooOld) {
           found.push({
@@ -182,7 +183,7 @@ export async function visitProfileForNewOriginals(
         }
       }
 
-      if (scannedCount >= MAX_ARTICLES_TO_SCAN) {
+      if (scannedCount >= options.maxArticles) {
         stop = true;
         break;
       }
@@ -197,7 +198,49 @@ export async function visitProfileForNewOriginals(
     await page.waitForTimeout(700);
   }
 
+  return { found, newestTweetId };
+}
+
+/**
+ * Visit a profile's Posts tab and collect original posts newer than
+ * lastSeenTweetId — the periodic "what's new since last check" use case
+ * (Priority Handles Worker).
+ */
+export async function visitProfileForNewOriginals(
+  page: Page,
+  username: string,
+  lastSeenTweetId: string | null
+): Promise<ProfileVisitResult> {
+  const handle = username.replace(/^@/, "");
+  const { found, newestTweetId } = await scanProfile(page, handle, {
+    maxArticles: MAX_ARTICLES_TO_SCAN,
+    maxAgeMs: MAX_AGE_MS,
+    stopAtId: lastSeenTweetId,
+  });
   // found is newest-first (scan order); reverse so callers enqueue in the
   // order the tweets were actually posted.
   return { newOriginals: found.reverse(), newestTweetId };
+}
+
+/**
+ * Collect every original post from a profile within maxAgeMs, regardless
+ * of any previously-seen cursor — the "catch up on anything in this
+ * window" use case (manual catch-up command). Callers are expected to
+ * de-duplicate against already-replied tweets themselves (e.g. via
+ * hasReplied()), since this returns everything in the window, not just
+ * what's new.
+ */
+export async function scanProfileWithinWindow(
+  page: Page,
+  username: string,
+  maxAgeMs: number,
+  maxArticles: number = MAX_ARTICLES_TO_SCAN
+): Promise<ProfileOriginalTweet[]> {
+  const handle = username.replace(/^@/, "");
+  const { found } = await scanProfile(page, handle, {
+    maxArticles,
+    maxAgeMs,
+    stopAtId: null,
+  });
+  return found.reverse();
 }

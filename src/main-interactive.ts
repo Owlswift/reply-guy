@@ -8,11 +8,12 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isLowPriority, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { isSelfReplyContinuation } from "./decision/threadContinuation";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
-import { extractCurrentTweet } from "./browser/extractTweet";
+import { extractCurrentTweet, TweetDetails } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { stats } from "./stats/runtime";
@@ -22,13 +23,16 @@ import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
 import { judgeReplies } from "./ai/judgeReply";
-import { promptWithTimeout } from "./utils/interactivePrompt";
+import { promptWithTimeout, PROMPT_TIMEOUT_MS } from "./utils/interactivePrompt";
 import chalk from "chalk";
 import { startNotificationLoop } from "./utils/notify";
 import { promptImageDecision, ImageDecision } from "./cli/promptImageDecision";
-import { alwaysSendToChatGPT } from "./decision/posterProfiles";
+import { promptReplyDecision, ReplyDecision } from "./cli/promptReplyDecision";
+import { promptGenerationFailedDecision, GenerationFailedDecision } from "./cli/promptGenerationFailed";
+import { postManualReply, hasManualReply, ManualReplyResult } from "./cli/postManualReply";
+import { alwaysSendToChatGPT, alwaysPromptBeforeReply } from "./decision/posterProfiles";
 import { markSkippedForImage, wasSkippedForImage } from "./storage/skippedImageTweets";
-import readlineSync from "readline-sync";
+import { markSkippedByOperator, wasSkippedByOperator } from "./storage/operatorSkippedTweets";
 import {
   getReadingTime,
   getMicroBreak,
@@ -106,20 +110,36 @@ const SKIP_IMAGE_TWEETS = process.env.SKIP_IMAGE_TWEETS === "true";
  */
 
 /**
- * Detect whether @unfairleverage has already replied in the open thread.
- * Looks for your handle link inside any article after the root tweet, to
- * avoid false matches from sidebar profile cards or "Replying to" text.
+ * Bookkeeping after postManualReply() resolves — shared by every "answer it
+ * myself" call site below. postManualReply() itself only prompts and posts;
+ * it doesn't know about the queue/notification/memory side effects, since
+ * those differ by caller (this file vs. the priority-handle catch-up command).
  */
-async function hasManualReply(page: Awaited<ReturnType<typeof getPage>>): Promise<boolean> {
-  const allArticles = page.locator('article');
-  const articleCount = await allArticles.count();
-  for (let a = 1; a < articleCount; a++) {
-    const linkCount = await allArticles.nth(a).locator('a[href="/unfairleverage"]').count();
-    if (linkCount > 0) {
-      return true;
-    }
-  }
-  return false;
+async function finalizeManualReply(
+  item: QueueItem,
+  details: TweetDetails,
+  result: ManualReplyResult
+): Promise<void> {
+  if (!result.posted) return;
+  markReplied(item.id);
+  markNotificationReplied(item.id);
+  stats.posted++;
+  try {
+    const { MemoryRepository } = await import("./database/MemoryRepository");
+    const memoryRepo = new MemoryRepository();
+    await memoryRepo.saveMemory({
+      id: "",
+      tweetId: item.id,
+      tweetText: details.fullText || details.text || item.text,
+      authorHandle: details.handle || item.author,
+      relationship: item.relationship || "stranger",
+      aiDraft: "manual",
+      finalReply: result.finalReply,
+      wasEdited: false,
+      approved: true,
+      createdAt: new Date()
+    });
+  } catch {}
 }
 
 async function main() {
@@ -147,14 +167,15 @@ async function main() {
   // profiles for new original posts, on its own tab, independent of the
   // notification-watching loop below. Fire-and-forget: it runs forever in
   // the background and feeds the same shared queue.
-  {
-    const { context } = await getBrowserAndContext();
-    const priorityPage = await context.newPage();
-    runPriorityHandleWorker(priorityPage, TOP_PRIORITY_HANDLES).catch(err =>
-      log(`[PriorityHandles] worker crashed, not restarting: ${err}`)
-    );
-    log(`Priority Handles Worker started (${TOP_PRIORITY_HANDLES.length} handles).`);
-  }
+  // Disabled for now — not needed at the moment.
+  // {
+  //   const { context } = await getBrowserAndContext();
+  //   const priorityPage = await context.newPage();
+  //   runPriorityHandleWorker(priorityPage, TOP_PRIORITY_HANDLES).catch(err =>
+  //     log(`[PriorityHandles] worker crashed, not restarting: ${err}`)
+  //   );
+  //   log(`Priority Handles Worker started (${TOP_PRIORITY_HANDLES.length} handles).`);
+  // }
 
   // The single source — notifications only
   const notificationSource = new NotificationFeedSource();
@@ -162,6 +183,26 @@ async function main() {
   // Navigate to notifications on startup
   log("Navigating to notifications...");
   await notificationSource.getTweets(page, navigator);
+
+  // Tracks consecutive "no new notifications, scroll for older" cycles.
+  // Five scrolls finding nothing is unusual enough that it's worth
+  // double-checking we're actually still on the filtered posts feed
+  // (/i/timeline) rather than silently scrolling somewhere useless —
+  // e.g. a goBack()/reload() earlier left the tab on /home or stranded
+  // it somewhere else entirely.
+  let consecutiveEmptyScrolls = 0;
+  const EMPTY_SCROLL_CHECK_THRESHOLD = 5;
+
+  async function checkStillOnFeedAfterEmptyScrolls(): Promise<void> {
+    consecutiveEmptyScrolls++;
+    if (consecutiveEmptyScrolls < EMPTY_SCROLL_CHECK_THRESHOLD) return;
+
+    if (!page.url().includes("/i/timeline")) {
+      log(`No new posts after ${consecutiveEmptyScrolls} scrolls and not on /i/timeline (currently ${page.url()}) — re-navigating via notifications.`);
+      await navigator.navigateToTimeline();
+    }
+    consecutiveEmptyScrolls = 0;
+  }
 
   while (stats.posted < DAILY_LIMIT) {
     // ============================================================
@@ -203,6 +244,7 @@ async function main() {
         const { scrollTimeline } = await import("./browser/scroll");
         await scrollTimeline(page);
         await page.waitForTimeout(2000);
+        await checkStillOnFeedAfterEmptyScrolls();
         continue;
       }
 
@@ -214,8 +256,13 @@ async function main() {
         const { scrollTimeline } = await import("./browser/scroll");
         await scrollTimeline(page);
         await page.waitForTimeout(2000);
+        await checkStillOnFeedAfterEmptyScrolls();
         continue;
       }
+
+      // Genuinely new, not-yet-replied posts to work through — reset the
+      // empty-scroll counter now that real progress is happening again.
+      consecutiveEmptyScrolls = 0;
 
       // Log each notification with score
       console.log("\n📋 New post notifications:");
@@ -237,6 +284,27 @@ async function main() {
         // Skip if already in queue
         const existing = getQueue().find((q: QueueItem) => q.id === tweet.id);
         if (existing) {
+          continue;
+        }
+
+        // Self-reply thread continuations (threadContinuation.ts) — the
+        // author replying to their own earlier tweet. X shows each part of
+        // a thread as its own notification/timeline entry with a unique
+        // id, so without this check every continuation gets treated as a
+        // brand-new story and replied to separately. Only the root tweet
+        // (not a reply, or a reply to someone else) is eligible.
+        if (isSelfReplyContinuation(tweet)) {
+          log(`Tweet ${tweet.id} from ${tweet.author} is a self-reply thread continuation — skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
+        // Blocked handles (scoreTweet.ts) — never reply to these authors,
+        // regardless of priority/urgent status. Takes precedence over
+        // every other check below.
+        if (isBlockedHandle(tweet.author, tweet.username)) {
+          log(`Tweet ${tweet.id} from blocked handle ${tweet.author} — skipping.`);
+          markReplied(tweet.id);
           continue;
         }
 
@@ -278,7 +346,13 @@ async function main() {
           continue;
         }
 
-        if (Math.random() > replyRatio) {
+        // Random reply-ratio throttle — skipped for urgent/top-priority
+        // (isUrgent already covers isTopPriority) and plain priority
+        // handles, since these should always get a reply, never a
+        // random pass-through.
+        const isPriorityHandle =
+          isUrgent(tweet.author, tweet.username) || isPriority(tweet.author, tweet.username);
+        if (!isPriorityHandle && Math.random() > replyRatio) {
           continue;
         }
 
@@ -341,6 +415,7 @@ async function main() {
           const { scrollTimeline } = await import("./browser/scroll");
           await scrollTimeline(page);
           await page.waitForTimeout(2000);
+          await checkStillOnFeedAfterEmptyScrolls();
         }
       }
 
@@ -372,6 +447,26 @@ async function main() {
           // Check if already replied BEFORE opening the tweet
           if (hasNotificationReplied(item.id)) {
             log(`Already replied to ${item.id}. Skipping.`);
+            dequeue();
+            continue;
+          }
+
+          // Gated handles (ALWAYS_PROMPT_HANDLES in posterProfiles.ts) — if
+          // the operator previously chose "skip" for this exact tweet when
+          // prompted, never re-open or re-prompt it.
+          // Fails open (treated as "not previously skipped") if Redis is
+          // unreachable, matching the same-shaped check below.
+          let previouslySkippedByOperator = false;
+          if (alwaysPromptBeforeReply(item.author)) {
+            try {
+              previouslySkippedByOperator = await wasSkippedByOperator(item.id);
+            } catch (err) {
+              log(`Redis check failed for ${item.id}, proceeding anyway: ${err}`);
+            }
+          }
+          if (previouslySkippedByOperator) {
+            log(`Tweet ${item.id} previously skipped by operator — not opening.`);
+            markReplied(item.id);
             dequeue();
             continue;
           }
@@ -467,6 +562,57 @@ async function main() {
           }
 
           // ============================================================
+          // Gated-handle prompt — for handles in ALWAYS_PROMPT_HANDLES
+          // (posterProfiles.ts), always pause for an operator decision
+          // before any reply is drafted, overriding the image gate and the
+          // ChatGPT/manual tweetType branch below. "Skip" is remembered
+          // per-tweet so this exact post is never re-prompted.
+          // ============================================================
+          const gatedPosterHandle = details.handle || item.author;
+          let operatorChoseChatGpt = false;
+          if (alwaysPromptBeforeReply(gatedPosterHandle)) {
+            log(`=== TWEET ${item.id} FROM ${gatedPosterHandle} — PAUSING FOR OPERATOR DECISION ===`);
+            const stopNotificationLoop = startNotificationLoop();
+
+            let decision: ReplyDecision;
+            try {
+              decision = await promptReplyDecision(
+                gatedPosterHandle,
+                details.fullText || details.text || item.text
+              );
+            } finally {
+              stopNotificationLoop();
+            }
+
+            if (decision === "skip" || decision === "timeout") {
+              if (decision === "skip") {
+                log(`Operator chose to skip tweet ${item.id} from ${gatedPosterHandle} — will always skip this post.`);
+                await markSkippedByOperator(item.id).catch(err =>
+                  log(`Redis write failed for ${item.id}, continuing anyway: ${err}`)
+                );
+              } else {
+                log(`No response for tweet ${item.id} from ${gatedPosterHandle} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping (not remembered).`);
+              }
+              markReplied(item.id);
+              markNotificationReplied(item.id);
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
+
+            if (decision === "myself") {
+              const manualResult: ManualReplyResult = await postManualReply(page, details.handle || item.author);
+              await finalizeManualReply(item, details, manualResult);
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
+
+            log(`Operator chose ChatGPT for tweet ${item.id} from ${gatedPosterHandle}.`);
+            operatorChoseChatGpt = true;
+          }
+
+          // ============================================================
           // Image gate — pause and ask before letting AI touch a tweet
           // that has an image, since images carry context an LLM can miss.
           // SKIP_IMAGE_TWEETS auto-skips any image tweet (the text-length
@@ -476,11 +622,14 @@ async function main() {
           // Top-priority handles (scoreTweet.ts) take precedence over both:
           // their image tweets always pause for manual review, never
           // auto-skipped and never auto-sent to ChatGPT.
+          // A gated handle whose operator already chose "chatgpt" above
+          // also bypasses this gate — they already made the call, no need
+          // to prompt a second time just because the tweet has an image.
           // ============================================================
           const posterHandle = details.handle || item.author;
           const hasImages = Boolean(details.imageUrls && details.imageUrls.length > 0);
           const isTopPriorityPoster = isTopPriority(posterHandle, posterHandle);
-          const isOverridePoster = !isTopPriorityPoster && alwaysSendToChatGPT(posterHandle);
+          const isOverridePoster = !isTopPriorityPoster && (alwaysSendToChatGPT(posterHandle) || operatorChoseChatGpt);
 
           if (hasImages && isOverridePoster) {
             log(`Tweet ${item.id} from ${posterHandle} has image(s) — poster override, sending straight to ChatGPT.`);
@@ -517,59 +666,17 @@ async function main() {
               stopNotificationLoop();
             }
 
+            if (decision === "skip") {
+              log(`No response for image tweet ${item.id} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping.`);
+              markReplied(item.id);
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
+
             if (decision === "myself") {
-              const manualReply = readlineSync.question(
-                chalk.cyan("\nType your reply and press Enter to post it (leave blank if you'd rather type it directly in the browser): ")
-              ).trim();
-
-              if (manualReply) {
-                // Post what was typed at the prompt, same path the automated flows use
-                const { prepareReply, clickReply } = await import("./reply/reply");
-                try {
-                  await prepareReply(page, manualReply);
-                  const success = await clickReply(page, details.handle || item.author);
-                  if (success) {
-                    markReplied(item.id);
-                    markNotificationReplied(item.id);
-                    stats.posted++;
-                    try {
-                      const { MemoryRepository } = await import("./database/MemoryRepository");
-                      const memoryRepo = new MemoryRepository();
-                      await memoryRepo.saveMemory({
-                        id: "",
-                        tweetId: item.id,
-                        tweetText: details.fullText || details.text || item.text,
-                        authorHandle: details.handle || item.author,
-                        relationship: item.relationship || "stranger",
-                        aiDraft: "manual",
-                        finalReply: manualReply,
-                        wasEdited: false,
-                        approved: true,
-                        createdAt: new Date()
-                      });
-                    } catch {}
-                    log(`Manual reply posted for ${item.id}.`);
-                  } else {
-                    log(`Failed to post manual reply for ${item.id}.`);
-                  }
-                } catch (err) {
-                  console.error(`Failed to post manual reply for ${item.id}:`, err);
-                }
-              } else {
-                // No text typed — assume they'll reply directly in the browser UI
-                console.log(chalk.cyan("Reply to it directly in the browser now."));
-                readlineSync.question(chalk.cyan("Press Enter once you've replied (or to skip)...\n"));
-
-                if (await hasManualReply(page)) {
-                  log(`Manual reply detected for ${item.id}.`);
-                  markReplied(item.id);
-                  markNotificationReplied(item.id);
-                  stats.posted++;
-                } else {
-                  log(`No manual reply detected for ${item.id}. Skipping.`);
-                }
-              }
-
+              const manualResult: ManualReplyResult = await postManualReply(page, details.handle || item.author);
+              await finalizeManualReply(item, details, manualResult);
               await navigator.returnToTimeline();
               dequeue();
               continue;
@@ -598,14 +705,23 @@ async function main() {
           
           let reply = "";
           // Greetings/well-wishes no longer get auto-generated by the local
-          // model — ask for a manual reply instead, skipping this tweet if
-          // there's no response within 60s.
+          // model — ask for a manual reply instead, skipping this tweet
+          // directly (no second prompt) if there's no response in time —
+          // the operator already had their PROMPT_TIMEOUT_MS window here.
           if (tweetType === "well_wish" || tweetType === "greeting") {
             console.log(`\n${chalk.cyan(`[${tweetType}] @${item.author}`)}: "${tweetText}"`);
             reply = (await promptWithTimeout(
-              chalk.cyan("Type a reply (60s, Enter to skip): "),
-              60_000
+              chalk.cyan(`Type a reply (${PROMPT_TIMEOUT_MS / 1000}s, Enter to skip): `),
+              PROMPT_TIMEOUT_MS
             )) ?? "";
+
+            if (!reply) {
+              log(`No response for ${tweetType} tweet ${item.id} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping.`);
+              markReplied(item.id);
+              await navigator.returnToTimeline();
+              dequeue();
+              continue;
+            }
           } else {
             // Use ChatGPT for other tweet types. Format-valid and non-duplicate
             // isn't enough on its own — judge whether the draft is actually
@@ -654,8 +770,27 @@ async function main() {
           }
 
           if (!reply || !validateReply(reply)) {
-            log(`Failed to generate valid reply for ${item.id}. Skipping.`);
-            markReplied(item.id);
+            log(`Failed to generate valid reply for ${item.id}. Pausing for your decision.`);
+            const stopNotificationLoop = startNotificationLoop();
+
+            let genFailedDecision: GenerationFailedDecision;
+            try {
+              genFailedDecision = await promptGenerationFailedDecision(
+                details.handle || item.author,
+                tweetText
+              );
+            } finally {
+              stopNotificationLoop();
+            }
+
+            if (genFailedDecision === "myself") {
+              const manualResult = await postManualReply(page, details.handle || item.author);
+              await finalizeManualReply(item, details, manualResult);
+            } else {
+              log(`Operator chose to skip tweet ${item.id} after generation failure.`);
+              markReplied(item.id);
+            }
+
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -869,7 +1004,8 @@ async function main() {
                 markReplied(ft.id);
                 continue;
               }
-              if (Math.random() > replyRatio2) continue;
+              const ftIsPriorityHandle = isUrgent(ft.author, ft.username) || isPriority(ft.author, ft.username);
+              if (!ftIsPriorityHandle && Math.random() > replyRatio2) continue;
               markNotificationSeen(ft.id, ft.url);
               enqueue({ id: ft.id, url: ft.url, author: ft.author, text: ft.text, createdAt: Date.now(), status: "pending" }, ft);
             }

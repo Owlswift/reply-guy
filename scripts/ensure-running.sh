@@ -10,12 +10,37 @@ cd "$(dirname "$0")/.."
 mkdir -p logs
 LOG_FILE="logs/echo.log"
 
+# Guard against overlapping runs of this script itself. Without this, a
+# slow ensure_docker/ensure_chrome_xcom wait (Docker can take up to its
+# full 2-minute timeout) leaves no main-interactive.ts or
+# watch-and-restart.sh process running yet — so if the next scheduled
+# tick fires in that window, its own is_running() check ALSO finds
+# nothing and launches a second, fully separate supervised app tree.
+LOCK_FILE="/tmp/echo-ensure-running.lock"
+if [ -f "$LOCK_FILE" ]; then
+  LOCK_PID="$(cat "$LOCK_FILE" 2>/dev/null)"
+  if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Another ensure-running.sh (PID $LOCK_PID) is still in progress — skipping this run."
+    exit 0
+  fi
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 is_running() {
   # Matches the actual node process regardless of how tsx invokes it under
   # the hood (loader flags, cli.mjs, etc. — "tsx" never actually appears
   # immediately adjacent to the script path, so don't match on that).
+  #
+  # Also treat a manual catch-up run (catchupPriorityHandles.ts) as "Echo
+  # is doing something" — without this, this check only knows about the
+  # main bot, so running the catch-up command alone (no main bot running)
+  # looked like "not running" and this script would launch a second,
+  # fully separate instance fighting the catch-up run over the same
+  # shared browser session.
   pgrep -f "main-interactive.ts" > /dev/null 2>&1 ||
-  pgrep -f "scripts/watch-and-restart.sh" > /dev/null 2>&1
+  pgrep -f "scripts/watch-and-restart.sh" > /dev/null 2>&1 ||
+  pgrep -f "catchupPriorityHandles.ts" > /dev/null 2>&1
 }
 
 log() {

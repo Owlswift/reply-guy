@@ -20,7 +20,10 @@ export function validateReply(reply: string): boolean {
     "verify you are human",
     "cloudflare",
     "access denied",
-    "error occurred"
+    "error occurred",
+    "something went wrong while generating the response",
+    "help.openai.com",
+    "if this issue persists"
   ];
 
   const lowerReply = trimmed.toLowerCase();

@@ -99,14 +99,16 @@ const REPLY_MODE_WEIGHTS: Array<[ReplyMode, number]> = [
   ["question", 0.10],
 ];
 
-function pickReplyMode(): ReplyMode {
-  const r = Math.random();
+function pickReplyMode(exclude: ReplyMode[] = []): ReplyMode {
+  const pool = REPLY_MODE_WEIGHTS.filter(([mode]) => !exclude.includes(mode));
+  const totalWeight = pool.reduce((sum, [, weight]) => sum + weight, 0);
+  const r = Math.random() * totalWeight;
   let cumulative = 0;
-  for (const [mode, weight] of REPLY_MODE_WEIGHTS) {
+  for (const [mode, weight] of pool) {
     cumulative += weight;
     if (r < cumulative) return mode;
   }
-  return "reflective";
+  return pool[pool.length - 1]?.[0] ?? "reflective";
 }
 
 // The trap to avoid in reflective mode: "more lines" is not what makes these
@@ -312,14 +314,15 @@ First, silently understand:
 - What's the most natural way a friend would react?
 
 If it's a LIGHT story, write ONE reply that reacts like a friend would:
-- Pick whichever fits: react with amusement, share a similar experience, ask a genuine follow-up, tease them, or (only if it's genuinely there) point at something in it the author didn't say outright.
+- Pick whichever fits: react with amusement, share a similar experience, tease them, or (only if it's genuinely there) point at something in it the author didn't say outright.
 - A single punchy sentence is usually right here. Don't force weight onto something that's just meant to be funny or mundane.
 
 If it's a HEAVY story, actually sit with what happened before you respond — don't rush past someone's pain to land a clever observation:
 - Lead with genuine sympathy or validation, stated in your own words using the SPECIFIC details of what they described — not a stock phrase like "sending love," "stay strong," or "you deserve better" with nothing attached to this particular story. Generic comfort reads as fake; specific comfort reads as real.
 - It's fine to use 2-3 sentences: validate what they're going through, name plainly what's actually unfair or messed up about the situation, and let it land on something warm and human rather than a detached one-liner.
 - This is NOT the same as "wrapping it up with a tidy moral" (a generic life lesson like "this is why communication matters"). Validating someone's specific pain is empathy, not moralizing — avoid the generic lesson, not the warmth.
-- A genuine follow-up question is fine only if it comes from real concern, not curiosity about what happens next.
+
+Almost every story posted on X is already told as a complete, resolved anecdote — the author already decided how it ends. Do NOT end your reply with a question, ever, regardless of how light or heavy the story is. A question at the end implies the story is unfinished or that you need more information to react — but you don't, and asking one (e.g. "Did he apologize after that?", "What did you do next?") undoes the closure the author already gave it and reads as stalling instead of reacting. If you genuinely want to reference something the story didn't cover, turn it into a statement about what you'd assume or how you'd feel, not a question aimed back at the author.
 
 ${BANNED_OPENERS}
 
@@ -330,7 +333,7 @@ DO NOT:
 - Summarize the story back to them.
 - For a LIGHT story: wrap it up with a tidy lesson or moral.
 - For a HEAVY story: stay detached, crack a joke, or open with a clever "insight" before acknowledging what they're actually going through.
-- Say things like "What happened next?" — that sounds like an AI.
+- End with a question of any kind — "Did he apologize?", "What happened next?", "How did that make you feel?" — all of it. The story is already finished; react to it, don't interview the author about it.
 - Invent new facts.
 
 ${analysis ? `Core point: ${analysis.main_point}` : ""}
@@ -912,7 +915,12 @@ export function buildPersonalityPrompt(
   // For eligible, substantive tweets, assign an explicit reply mode from
   // the weighted rotation above instead of leaving "what kind of reply"
   // fully up to the model — see REPLY_MODE_WEIGHTS for why.
-  const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized) ? pickReplyMode() : null;
+  // "question" is excluded for stories specifically: a posted story is
+  // almost always already a complete, resolved anecdote, and ending a
+  // reply with a question ("Did he apologize?") reopens something the
+  // author already closed instead of just reacting to it.
+  const excludedModes: ReplyMode[] = normalized === "story" ? ["question"] : [];
+  const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized) ? pickReplyMode(excludedModes) : null;
   const modeBlock = mode ? `\n${REPLY_MODE_BLOCKS[mode]}\n` : "";
 
   // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
