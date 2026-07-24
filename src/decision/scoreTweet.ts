@@ -84,7 +84,9 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@Laiiyylaa",
   "@ErikDavis",
   "@miiagarro",
-  "@TyyTyra"
+  "@TyyTyra",
+  "@MegOfficiall",
+  "@jas_d_barbie"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -157,6 +159,28 @@ export function isBlockedHandle(author: string, username: string): boolean {
   const normalized = normalizeHandle(author);
   const normalizedUser = normalizeHandle(username);
   return BLOCKED_HANDLES.some(
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
+  );
+}
+
+/**
+ * Review handles — never auto-replied to, but not silently dropped like
+ * BLOCKED_HANDLES either. Their posts get skipped and the URL logged to a
+ * persistent, numbered list (storage/flaggedPosts.ts) so the operator can
+ * go look at them by hand later, instead of Echo deciding on its own.
+ */
+export const REVIEW_HANDLES: string[] = [
+  "@beemyli",
+  "katyakayy"
+];
+
+/**
+ * Check if the author is a review handle.
+ */
+export function isReviewHandle(author: string, username: string): boolean {
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
+  return REVIEW_HANDLES.some(
     h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   );
 }

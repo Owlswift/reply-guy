@@ -8,10 +8,12 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { flagPostForReview } from "./storage/flaggedPosts";
 import { isSelfReplyContinuation } from "./decision/threadContinuation";
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
+import { recordAuthorReply, repliedToAuthorRecently } from "./storage/recentAuthorReplies";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
@@ -176,6 +178,7 @@ async function finalizeManualReply(
   markReplied(item.id);
   markNotificationReplied(item.id);
   stats.posted++;
+  await recordAuthorReply(details.handle || item.author).catch(() => {});
   try {
     const { MemoryRepository } = await import("./database/MemoryRepository");
     const memoryRepo = new MemoryRepository();
@@ -390,6 +393,20 @@ async function main() {
           continue;
         }
 
+        // Second, DOM-independent gate against replying to every part of the
+        // same multi-tweet thread (storage/recentAuthorReplies.ts). The check
+        // above only catches a continuation if X's DOM shows a "Replying to
+        // @self" banner on THIS specific card, and X doesn't reliably render
+        // that for every segment — when it doesn't, each part looks like a
+        // brand-new post and Echo replies to every single one of them. This
+        // catches it regardless: a same-author reply this recent is almost
+        // certainly the same story continuing, not a genuinely new post.
+        if (await repliedToAuthorRecently(tweet.username || tweet.author).catch(() => false)) {
+          log(`Tweet ${tweet.id} from ${tweet.author} — already replied to this author recently, likely the same thread — skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
         // Blocked handles (scoreTweet.ts) — never reply to these authors,
         // regardless of priority/urgent status. Takes precedence over
         // every other check below. This also covers REPOSTS of a blocked
@@ -401,6 +418,18 @@ async function main() {
         // needed, just a clearer log so it's visible this is what happened.
         if (isBlockedHandle(tweet.author, tweet.username)) {
           log(`Tweet ${tweet.id}${tweet.isRepost ? " (a repost)" : ""} from blocked handle ${tweet.author} — skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
+        // Review handles (scoreTweet.ts) — never auto-replied to, but
+        // flagged for manual review (storage/flaggedPosts.ts) instead of
+        // silently dropped like BLOCKED_HANDLES.
+        if (isReviewHandle(tweet.author, tweet.username)) {
+          log(`Tweet ${tweet.id} from ${tweet.author} is a review handle — flagging for manual review, not replying.`);
+          await flagPostForReview(tweet.url).catch(err =>
+            log(`Redis write failed flagging ${tweet.id} for review, continuing anyway: ${err}`)
+          );
           markReplied(tweet.id);
           continue;
         }
@@ -620,6 +649,19 @@ async function main() {
           if (!details) {
             log(`Cannot extract tweet ${item.id}. Skipping.`);
             markReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Safety net for the same-thread dedup check in PHASE 1 — catches
+          // anything that reached the queue through a path that skips it
+          // entirely (the low-priority deferral cache only ever stores a
+          // bare URL, with no author to check against at enqueue time).
+          if (await repliedToAuthorRecently(details.handle || item.author).catch(() => false)) {
+            log(`Tweet ${item.id} from ${details.handle || item.author} — already replied to this author recently, likely the same thread — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -1086,6 +1128,7 @@ async function main() {
           markNotificationReplied(item.id);
           dequeue();
           stats.posted++;
+          await recordAuthorReply(details.handle || item.author).catch(() => {});
 
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
@@ -1133,6 +1176,7 @@ async function main() {
           markNotificationReplied(item.id);
           dequeue();
           stats.posted++;
+          await recordAuthorReply(details.handle || item.author).catch(() => {});
 
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
