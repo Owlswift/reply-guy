@@ -86,6 +86,20 @@ fi
 ensure_docker
 ensure_chrome_xcom
 
+# Re-check right before actually launching. ensure_docker alone can block
+# for up to its full 2-minute timeout — if a manual run (e.g. in iTerm) got
+# started anytime between the is_running() check above and now, launching
+# unconditionally here would spin up a second, fully separate instance
+# fighting the manual one over the same shared browser session. This is
+# exactly how "I was running it in iTerm and another one spun up on its
+# own" happens: launchd fires this script every 5 minutes (see
+# com.echo.ensure-running.plist), and the first check can go stale during
+# the docker/chrome wait.
+if is_running; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') Echo started running while waiting on docker/chrome — not launching a second instance."
+  exit 0
+fi
+
 if [[ "$1" == "--foreground" || "$1" == "-t" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') Echo is not running — opening a Terminal window..."
   PROJECT_DIR="$(pwd)"

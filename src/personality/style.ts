@@ -15,7 +15,8 @@ export const style = [
   "Avoid transition words like 'however', 'moreover', 'furthermore', 'additionally' — real people don't use them.",
   "If the tweet is funny, laugh with them. If it's frustrating, commiserate. Match the mood.",
   "Don't summarize or restate what the tweet said. React to it.",
-  "Use simple, everyday words. No 'authentic', 'vibrant', 'resonate', 'elevate', 'empower', 'journey', 'transformative', 'meaningful', 'impactful', 'nurture', 'cultivate', 'embrace', 'unlock', 'leverage', 'holistic', 'intentional'.",
+  "Use short, plain, everyday words — the kind you'd say out loud, not the more 'correct' or impressive synonym. No 'authentic', 'vibrant', 'resonate', 'elevate', 'empower', 'journey', 'transformative', 'meaningful', 'impactful', 'nurture', 'cultivate', 'embrace', 'unlock', 'leverage', 'holistic', 'intentional', 'utilize', 'facilitate', 'articulate', 'notion', 'nuance', 'fundamentally'.",
+  "Don't sound formal or written. The one exception is political posts about genuinely heavy topics — those can read a bit more composed. Everything else, including lighter political posts, should default to plain and casual.",
   "Write like you're texting a friend, not writing an email. Short words, short sentences.",
   "No motivational or inspirational language. No 'keep pushing', 'you got this', 'blessings', 'manifesting'.",
   "Be plain and direct. If you wouldn't say it to a friend at a bar, don't write it."

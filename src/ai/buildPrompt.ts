@@ -1,5 +1,5 @@
 import { classifyTweet } from "./classifyTweet";
-import { analyzeTweet, TweetAnalysis } from "./analyzeTweet";
+import { analyzeTweet, TweetAnalysis, TweetContext } from "./analyzeTweet";
 import { Relationship } from "../relationship/types";
 import { buildPersonalityPrompt } from "../personality/prompt";
 import { ReplyMemory } from "../types/memory";
@@ -9,6 +9,13 @@ export interface PromptInput {
     relationship: Relationship;
     memories: ReplyMemory[];
     imageDescriptions?: string[] | undefined;
+    // Surrounding context extractTweet.ts found for the current tweet — a
+    // quoted tweet, a parent tweet it's replying to, or an earlier segment
+    // of the same author's own thread. Optional because most tweets are
+    // standalone; when present, it changes both classification (analyzeTweet)
+    // and the actual reply prompt (buildPersonalityPrompt) — a tweet's
+    // meaning can flip entirely depending on what it's quoting or replying to.
+    context?: TweetContext | undefined;
 }
 
 export interface PromptResult {
@@ -25,7 +32,7 @@ export async function buildPrompt(input: PromptInput): Promise<PromptResult> {
     let analysis: TweetAnalysis | undefined;
     if (keywordCategory !== "well_wish" && keywordCategory !== "greeting") {
         try {
-            analysis = await analyzeTweet(input.tweet);
+            analysis = await analyzeTweet(input.tweet, input.context ?? {});
         } catch {
             // Model analysis is optional — fall back to keyword-only
         }
@@ -47,7 +54,8 @@ export async function buildPrompt(input: PromptInput): Promise<PromptResult> {
         category,
         input.memories,
         input.imageDescriptions,
-        analysis
+        analysis,
+        input.context
     );
 
     return { prompt, category, analysis: analysis ?? null };

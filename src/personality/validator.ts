@@ -30,7 +30,10 @@ export function validateReply(reply: string): boolean {
     "error occurred",
     "something went wrong while generating the response",
     "help.openai.com",
-    "if this issue persists"
+    "if this issue persists",
+    // ChatGPT's mid-stream failure bubble — see src/ai/chatgpt.ts for why
+    // this needs to be here too (same check, second line of defense).
+    "error in message stream"
   ];
 
   const lowerReply = trimmed.toLowerCase();
@@ -50,6 +53,10 @@ export function validateReply(reply: string): boolean {
     "if that's true",
     "if this happened",
     "if that happened",
+    // "wild" alone catches "Wild,", "Wild that...", "Wild how..." (the
+    // word-boundary check below stops it from also matching "wildly").
+    "wild",
+    "that's wild",
   ];
 
   const lowerReplyTrimmed = trimmed.toLowerCase().trimStart();

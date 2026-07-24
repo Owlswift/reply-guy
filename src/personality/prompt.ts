@@ -3,8 +3,49 @@ import { style } from "./style";
 import { getExamples } from "./examples";
 import { Relationship } from "../relationship/types";
 import { TweetCategory } from "../types/analysis";
-import { TweetAnalysis } from "../ai/analyzeTweet";
+import { TweetAnalysis, TweetContext } from "../ai/analyzeTweet";
 import { ReplyMemory } from "../types/memory";
+
+// ─── Surrounding context block — quote-tweet/reply/thread awareness ─────────
+// Without this, a tweet gets analyzed and replied to in complete isolation
+// even when its actual meaning depends entirely on what it's quoting or
+// replying to — "this generation is cooked" reads nothing like itself
+// depending on whether it's mocking a bad take or agreeing that "my
+// girlfriend bought me a car for my birthday" is somehow a red flag.
+// extractTweet.ts gathers this (quotedTweet/parentTweet/previousThreadPost)
+// and analyzeTweet.ts's quote_stance judges the author's actual stance
+// toward a quoted tweet specifically — this just surfaces both to the model
+// writing the reply, prepended ahead of every category prompt so it's read
+// before any category-specific instructions.
+function buildContextBlock(context: TweetContext | undefined, analysis: TweetAnalysis | undefined): string {
+  if (!context) return "";
+
+  const parts: string[] = [];
+
+  if (context.parentTweet) {
+    parts.push(`This tweet is a REPLY to another tweet. What it's replying to:\n"${context.parentTweet}"`);
+  }
+  if (context.previousThreadPost) {
+    parts.push(`This tweet continues the SAME author's own earlier thread. The tweet right before it:\n"${context.previousThreadPost}"`);
+  }
+  if (context.quotedTweet) {
+    const stance = analysis?.quote_stance;
+    const stanceLine = stance && stance !== "not_applicable"
+      ? `\nThe author's stance toward the quoted tweet: ${stance.replace(/_/g, " ")}.`
+      : "";
+    parts.push(`This tweet QUOTES another tweet. The quoted tweet:\n"${context.quotedTweet}"${stanceLine}`);
+  }
+
+  if (parts.length === 0) return "";
+
+  return `SURROUNDING CONTEXT — read this before reacting. The current tweet's actual meaning depends on it, not just its own words:
+
+${parts.join("\n\n")}
+
+Your reply must make sense given this context. If the current tweet is mocking, disagreeing with, or adding a twist to the quoted/parent tweet, do NOT write a reply that reads as agreeing with the quoted/parent tweet instead (or vice versa) — that's the single most common way a technically well-written reply ends up making no sense in context.
+
+`;
+}
 
 type CategoryPrompts = Record<string, (tweet: string, analysis?: TweetAnalysis) => string>;
 
@@ -79,7 +120,8 @@ CRITICAL RULES - NEVER VIOLATE THESE:
 - NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing.
 - NEVER write "X wasn't really about Y, it was about Z," "X isn't about Y, it's Z," "That wasn't about [X]," or "This just proves [X]" — these are all the same cliché reframe/summary trick in different words. If your reply's structure is "[thing] wasn't about [surface reason], it was [real reason]," rewrite it.
 - NEVER start with "I wonder if," "I've noticed," "I'm starting to think," or "Maybe."
-- NEVER start with "The funny part is," "The painful part is," "The scary part is," "The crazy part is," "The best part is," "The worst part is," or any "The [adjective] part is" framing.`;
+- NEVER start with "The funny part is," "The painful part is," "The scary part is," "The crazy part is," "The best part is," "The worst part is," or any "The [adjective] part is" framing.
+- NEVER start with "Wild," "Wild that," "Wild how," or "That's wild" — "wild" is a generic, one-word-fits-any-tweet reaction, not an actual response to what THIS tweet said. If your first instinct is "wild," find the specific thing that's actually surprising and say that instead.`;
 
 // ─── Reply modes — explicit rotation instead of one implicit default ─────────
 // Most replies stay short (REPLY_PHILOSOPHY's default). But letting the
@@ -112,6 +154,71 @@ function pickReplyMode(exclude: ReplyMode[] = []): ReplyMode {
   return pool[pool.length - 1]?.[0] ?? "reflective";
 }
 
+// ─── Randomized pools for the shorthand/grammar demonstrations below ────────
+// A literal phrase repeated verbatim in every single prompt call (the same
+// "kinda wild", the same fixed shorthand list) teaches the model to reuse
+// that exact phrase across replies instead of the underlying pattern it's
+// meant to illustrate — that's exactly why "kinda wild" and "ngl" started
+// showing up constantly once these rules shipped. Rotating a random subset
+// per call, plus explicitly banning over-reliance on any one of them, keeps
+// the instruction demonstrating the pattern without becoming the model's
+// new default vocabulary.
+
+function pickRandomSubset<T>(pool: T[], count: number): T[] {
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+const SHORTHAND_POOL = ["ngl", "tbh", "lowkey", "highkey", "kinda", "rn", "fr", "ig", "sorta", "gonna", "wanna", "u", "ur", "af"];
+
+const DROPPED_SUBJECT_EXAMPLES: Array<[string, string]> = [
+  // "kinda wild" used to be in this pool. It was showing up as a literal,
+  // repeated reply-opener across totally unrelated tweets — a rotating pool
+  // still repeats a phrase 1-in-N times, and "wild" is generic enough to
+  // fit almost any reaction, so it became the model's safe default the same
+  // way "ngl" did before this pool existed. Removed; see also the new
+  // "wild" entry in BANNED_OPENERS below.
+  ["makes sense honestly", "that makes sense honestly"],
+  ["rough one", "that's a rough one"],
+  ["not surprising at all", "that's not surprising at all"],
+  ["feels about right", "that feels about right"],
+  ["kind of a lot", "that's kind of a lot"],
+];
+
+const GRAMMAR_LOOSENESS_EXAMPLES: Array<[string, string]> = [
+  [
+    "That's rarely about the job itself, it's about the schedule that gave people their identity.",
+    "its never really the job people miss, its the schedule that told them who they were"
+  ],
+  [
+    "Imposter syndrome doesn't go away because the bar you're measuring against keeps moving with you.",
+    "impostor syndrome doesnt go away cause the bar just keeps moving with you"
+  ],
+  [
+    "When someone orders way more than you, then suggests splitting evenly, it's hard not to wonder if you were invited on a date or invited to fund a craving.",
+    "ordering way more than me then asking to split evenly...feels less like a date and more like i got invited to fund somebody's craving"
+  ],
+  [
+    "It's funny how the instructions are never wrong until the very last step.",
+    "instructions are never wrong til the very last step lol"
+  ],
+  [
+    "The fear was never really about the startup failing, it was about not knowing who you'd be after.",
+    "the fear was never really about the startup failing, it was not knowing who you'd be after"
+  ],
+];
+
+function buildGrammarLooseness(): string {
+  const picked = pickRandomSubset(GRAMMAR_LOOSENESS_EXAMPLES, 3);
+  const lines = picked.map(([clean, casual]) => `Too clean: "${clean}"\nActually casual: "${casual}"`).join("\n\n");
+  return `
+What "actually casual" looks like vs. the too-clean version — match the second line, not the first:
+
+${lines}
+
+The right column is the actual bar, not the left one. Before you finalize your reply, check: does it read like the left column (clean, correct, composed) or the right one (dropped apostrophes okay, lowercase okay, run it together with "..." or "and" instead of a comma)? If it reads like the left column, rewrite it like the right one. Vary your own phrasing too — these are one demonstration of the pattern, not a script to copy from. Don't let any single filler (like "kinda wild" or "ngl") become your default across replies.`;
+}
+
 // The trap to avoid in reflective mode: "more lines" is not what makes these
 // work. The reframe-reveal trick ("X isn't about Y, it's Z", "Most people
 // think X, I think Y") is banned above for being a cliché — stretching that
@@ -122,9 +229,11 @@ function pickReplyMode(exclude: ReplyMode[] = []): ReplyMode {
 // what actually reads as someone who stopped to think, not a word-count.
 const REPLY_MODE_BLOCKS: Record<ReplyMode, string> = {
   reflective: `
-REFLECTIVE MODE for this reply — you have more room than usual:
+REFLECTIVE MODE for this reply — you have more room than usual, IF this tweet actually earns it:
 
-Write at least TWO developed thoughts — not two lines, two distinct steps in the idea. That usually comes out to 2-5 short lines, but the line count is a side effect, not the goal; two lines that just restate the same point in different words is still only one thought and doesn't satisfy this. Good shapes:
+Check first: is this tweet an actual substantive point, story, or claim with more than one thing going on in it — or is it a short relatable/meme-format post (a "me the second X", "the [thing] when Y", a single-beat observation, a quick joke-shaped post) that just happens to be a bit longer than 5 words? Word count alone doesn't decide this — a 15-word meme post has exactly ONE beat in it, not two, no matter how it's phrased. If it's the latter, IGNORE this mode entirely and write ONE short line instead, the way REPLY_PHILOSOPHY's default already describes. Don't force a second thought that doesn't exist just because this mode got assigned.
+
+If it genuinely does have more to it, write at least TWO developed thoughts — not two lines, two distinct steps in the idea. That usually comes out to 2-5 short lines, but the line count is a side effect, not the goal; two lines that just restate the same point in different words is still only one thought and doesn't satisfy this. Good shapes:
 - An observation, then what it reveals or implies — optionally a third line that extends it further.
 - A specific example, followed by what it actually shows.
 - A small real argument: a claim, then a specific reason or scenario that backs it.
@@ -307,6 +416,7 @@ You are replying on X.
 
 The author is telling a story.
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 First, silently understand:
 
@@ -315,12 +425,14 @@ First, silently understand:
 - Is this a LIGHT story (funny mishap, mundane annoyance, a mildly interesting anecdote) or a HEAVY one (the author is describing real hurt — abuse, betrayal, divorce, loss, injustice, a hard situation they're actually living through)? This changes the TONE, not the format below. Don't default to "heavy" just because a story is negative — someone venting about a bad Uber driver is still light.
 - Does the story explicitly ask for a verdict or judgment call ("was I wrong?", "AITA", "who's right here?", "A or B?")? If so, your reply MUST actually answer that specific ask, grounded in the human dynamic underneath the situation (see REPLY_PHILOSOPHY above) — not just react to the anecdote in general and skip the thing they actually asked.
 
-Write a reply that is 2–5 lines long, and:
+Match your reply's length to how much the story actually has going on — don't default to a fixed length:
 
+- If it's a small, one-line-worthy moment (a minor mishap, a mundane annoyance, a story that's basically already a punchline) → ONE short line is enough and often better. Don't pad it into extra lines just to seem thoughtful.
+- If it's a genuinely heavier or more layered story — one with real stakes, hurt, or a lesson worth spelling out — 2-5 lines is fine, per LIGHT/HEAVY below.
 - Extracts the LESSON, not the plot. Don't react event-by-event to what happened — react to what it means. Commenting on the twist, or restating what occurred, isn't a reply, it's a recap.
 - Reads like a thoughtful observation someone would actually say out loud after hearing this — not a summary, not a book report, not a formal takeaway.
 - Lands emotionally — specific enough to the details of THIS story that a stranger reading just your reply would feel something, not a generic sentiment that could sit under any sad or funny story.
-- If it's LIGHT: react like a friend would — amused, wry, a shared feeling — without forcing weight onto something that's just meant to be funny or mundane. Shorter is usually right here (2-3 lines).
+- If it's LIGHT: react like a friend would — amused, wry, a shared feeling — without forcing weight onto something that's just meant to be funny or mundane. A single line is usually the right call here — see the toilet/IKEA examples below.
 - If it's HEAVY: lead with genuine sympathy or validation stated in your own words using the SPECIFIC details of what they described — not a stock phrase like "sending love," "stay strong," or "you deserve better" with nothing attached to this particular story. Generic comfort reads as fake; specific comfort reads as real. This can use the fuller 4-5 lines: validate what they're going through, name plainly what's actually unfair or messed up, and let it land on something warm and human.
 
 On questions: almost every story on X is already told as a complete, resolved anecdote — the author decided how it ends. Do NOT end with an OBVIOUS question — one that's just asking for missing plot details ("Did he apologize after that?", "What happened next?", "Did they ever find out who did it?"). Those undo the closure the author already gave the story and read as stalling, not reacting. The ONLY exception is a genuinely thought-provoking question — one that extends the LESSON outward (about people, trust, regret, timing in general) rather than asking for more plot. If you're not sure whether your question is genuinely thought-provoking or just curiosity about what happened next, don't ask it — end on the observation instead.
@@ -336,7 +448,7 @@ DO NOT:
 - For a HEAVY story: stay detached, crack a joke, or open with a clever "insight" before acknowledging what they're actually going through.
 - End with an obvious, plot-seeking question — "Did he apologize?", "What happened next?", "How did that make you feel?" — save a question for the rare case it's genuinely thought-provoking, not plot curiosity.
 - Invent new facts.
-- Go under 2 lines or over 5.
+- Pad a one-line-worthy reaction out to 2+ lines just to hit a length target — a small story deserves a small reply. Go over 5 lines either way.
 
 ${analysis ? `Core point: ${analysis.main_point}` : ""}
 
@@ -379,6 +491,7 @@ You are replying on X.
 
 The author shared an opinion publicly. They are NOT talking to you directly.
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 Your reply is an observation ABOUT what they said, not a response to being addressed.
 
@@ -555,6 +668,7 @@ You are replying on X.
 
 The author shared advice, a hot take, or a rant.
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 First, silently decide:
 
@@ -613,6 +727,7 @@ You are replying on X.
 
 The author posted about politics or political news.
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 First, silently decide:
 
@@ -622,6 +737,7 @@ First, silently decide:
 Then write ONE reply that's a plain, measured reaction — not a recap, and not a neatly-wrapped takeaway.
 
 - Pick whichever fits: a specific reason you agree or disagree, a related fact, a genuine question, or (only if it's genuinely there) a trade-off the tweet glosses over. Measured in tone either way.
+- Political posts are the one place a bit more formality is allowed — but only when the topic actually calls for it (a serious policy issue, a tragedy, a heated national debate), not by default. Most political replies should still be as plain and casual as anywhere else; save the more composed register for the occasional post that's genuinely heavy.
 - Focuses on policy or impact, not personality.
 
 ${BANNED_OPENERS}
@@ -698,6 +814,7 @@ You are replying on X.
 
 The author posted about work or career.
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 First, silently identify:
 
@@ -839,6 +956,7 @@ ${imageContext}
 ${analysisContext}
 
 ${REPLY_PHILOSOPHY}
+${buildGrammarLooseness()}
 
 First, silently analyze the tweet's context:
 
@@ -921,7 +1039,8 @@ export function buildPersonalityPrompt(
   type: TweetCategory,
   memories: ReplyMemory[],
   imageDescriptions?: string[],
-  analysis?: TweetAnalysis
+  analysis?: TweetAnalysis,
+  context?: TweetContext
 ): string {
   // Map "joke" to "humor" for backward compatibility
   const normalized: TweetCategory = type === ("joke" as string) ? "humor" : type;
@@ -934,6 +1053,8 @@ export function buildPersonalityPrompt(
     ? categoryPromptFn(tweet, analysis)
     : buildGenericPrompt(tweet, relationship, normalized, memories, imageDescriptions, analysis);
 
+  const contextBlock = buildContextBlock(context, analysis);
+
   // For eligible, substantive tweets, assign an explicit reply mode from
   // the weighted rotation above instead of leaving "what kind of reply"
   // fully up to the model — see REPLY_MODE_WEIGHTS for why.
@@ -941,24 +1062,72 @@ export function buildPersonalityPrompt(
   // almost always already a complete, resolved anecdote, and ending a
   // reply with a question ("Did he apologize?") reopens something the
   // author already closed instead of just reacting to it.
-  const excludedModes: ReplyMode[] = normalized === "story" ? ["question"] : [];
+  //
+  // "reflective" is excluded for one-liner tweets regardless of category.
+  // Reflective mode forces "at least TWO developed thoughts... 2-5 lines" —
+  // that's a fixed-length instruction with no signal from the tweet's own
+  // brevity, so a trivial one-liner picked into reflective mode used to get
+  // padded into an essay just because the dice landed on that mode, not
+  // because the tweet had that much to say.
+  //
+  // Threshold was 12 words — too low: a real example, "me the second i come
+  // home from any event because i'm easily overstimulated" (13 words, one
+  // meme-format beat, not two ideas), was one word over and still got
+  // padded into a 3-thought reply. Word count is a crude proxy for "has
+  // enough material for two thoughts" at best, so this is raised to 20 and
+  // paired with a self-check inside REFLECTIVE_MODE_BLOCKS.reflective itself
+  // (which can bail out on a longer-but-still-one-beat tweet that this
+  // number alone won't catch), rather than trying to tune the number alone.
+  const wordCount = tweet.trim().split(/\s+/).filter(Boolean).length;
+  const isOneLiner = wordCount <= 20;
+  const excludedModes: ReplyMode[] = [
+    ...(normalized === "story" ? (["question"] as ReplyMode[]) : []),
+    ...(isOneLiner ? (["reflective"] as ReplyMode[]) : []),
+  ];
   const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized) ? pickReplyMode(excludedModes) : null;
   const modeBlock = mode ? `\n${REPLY_MODE_BLOCKS[mode]}\n` : "";
+
+  // Vocabulary/formality rule — politics is the one category allowed to read
+  // as more composed, and only when the topic itself is heavy (see the
+  // politics prompt above). Every other category should default to the
+  // smallest, plainest words available, not just "no corporate jargon."
+  const isPolitics = normalized === "politics";
+  const vocabularyRule = isPolitics
+    ? `• Political posts are the one exception to "keep it casual" — if the topic is genuinely heavy (policy, tragedy, a serious debate), it's fine to sound a bit more composed and use slightly bigger words than usual. For a lighter political post, default back to the same plain, short words as every other category — don't reach for formal phrasing just because the topic is politics.`
+    : `• Use short, plain, everyday words — the kind you'd actually say out loud, not the more "correct" or impressive-sounding synonym. If a word has a simpler everyday version, use the simpler one. Nothing that reads formal, academic, or written — this should sound like someone typing fast on their phone, not composing a sentence.`;
+
+  // Word choice, grammar, and shorthand are the three concrete levers for
+  // "informal" — simple vocabulary alone isn't enough if the sentences are
+  // still clean and evenly-punctuated (that reads as written, not typed).
+  const fillerWordsRule = `• Cut qualifier words that only exist to sound thoughtful: "genuinely", "truly", "certainly", "completely", "entirely", "essentially", "in fact", "actually" (unless it's doing real contrastive work, e.g. "wait that's actually funny"). If the sentence still means the same thing without the qualifier, the qualifier wasn't adding anything — delete it.`;
+
+  const [droppedExample, fullExample] = pickRandomSubset(DROPPED_SUBJECT_EXAMPLES, 1)[0]!;
+  const looseGrammarRule = `• Don't write clean, evenly-balanced sentences with a tidy subject-verb-comma structure — that's what makes a reply read as composed instead of typed. Drop the subject when it's obvious (e.g. "${droppedExample}" instead of "${fullExample}" — that's just one example of the pattern, not a phrase to reuse), skip a comma and just run two short thoughts together with "and" or a space, and let a sentence trail off or stay a fragment instead of resolving it neatly. Uneven and slightly messy beats grammatically correct. Match the "actually casual" column from the examples earlier in this prompt, not the "too clean" one — that contrast is the actual bar, not these bullet points.`;
+
+  const shorthandRule = isPolitics
+    ? `• Even in the more composed political register, keep it contraction-heavy and don't clean the grammar up into full sentences — "composed" means the ideas are more serious, not that the typing is more correct.`
+    : `• Reach for actual texting shorthand where it fits the vibe of the specific reply — things like ${pickRandomSubset(SHORTHAND_POOL, 4).map(w => `"${w}"`).join(", ")} — instead of defaulting to the fully spelled-out formal version. That's a sample, not a fixed list — vary which one you reach for across replies, and most replies need none at all. Don't let any single one of these (especially "ngl") become your default go-to every time.`;
 
   // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
   // Placing it here ensures every single prompt variant gets this reinforcement.
   const finalGuardrail = `\n\nFINAL INSTRUCTIONS — VIOLATIONS GET DELETED:
-• Before you write, ask: does this reply say something the tweet didn't already say? If not, it's a summary wearing a reply's clothes — start over.
+${context && (context.quotedTweet || context.parentTweet || context.previousThreadPost)
+    ? `• Before anything else: re-read the SURROUNDING CONTEXT section above. Your reply has to make sense against what this tweet is actually quoting/replying to, not just its own words in isolation — a technically well-written reply that agrees with something the author was mocking (or vice versa) is a worse failure than any stylistic issue below.\n`
+    : ""}• Before you write, ask: does this reply say something the tweet didn't already say? If not, it's a summary wearing a reply's clothes — start over.
 • Do NOT restate or summarize the tweet, even reworded or dressed up as an "insight." Assume the reader already read the tweet.
 • Do NOT start with: "One thing I'd add", "One thing to add", "If that's really what happened", "If that's true", "If this happened", or "If that happened".
 • Do NOT write "X wasn't really about Y, it was about Z", "X isn't about Y, it's Z", "That wasn't about X", or "This just proves X" — same cliché reframe/summary trick in different words. This also usually means you're just restating the tweet's own point as a punchline instead of adding something — check for that too.
 • Do NOT start with: "I wonder if", "I've noticed", "I'm starting to think", or "Maybe".
 • Do NOT start with: "The funny part is", "The painful part is", "The scary part is", "The crazy part is", "The best part is", "The worst part is", or any "The [adjective] part is" framing.
+• Do NOT start with "Wild", "Wild that", "Wild how", or "That's wild" — it's a generic reaction that fits literally any tweet, which is exactly why it keeps showing up. Say what's actually surprising instead of naming the reaction to it.
 • Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
 • Your reply is an observation, not a transaction. Never invent actions.
-• Use simple, everyday words. Write like you're texting a friend — short words, short sentences.
+${vocabularyRule}
+${fillerWordsRule}
+${looseGrammarRule}
+${shorthandRule}
 • Do NOT use em dashes (—) or double hyphens (--) to link or separate clauses. That punctuation habit is one of the most obvious "written by AI" tells and instantly gives away that this wasn't typed by a person. Use a comma, a period, or just start a new sentence instead.
-• No fancy words like "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage".
+• No fancy or formal words: "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage", "utilize", "facilitate", "demonstrate", "articulate", "notion", "narrative", "nuance", "fundamentally", "inherently", "essentially"${isPolitics ? " — even on politics, these read as corporate jargon, not \"composed,\" so they're still banned" : ""}.
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
 • Do NOT add an emoji just to soften, lighten, or punctuate a reply — especially not on a reflective, vulnerable, or emotionally honest tweet, where it undercuts the point instead of adding to it. Only use one if the tweet's own tone genuinely calls for it (it's already playful, already using emoji, etc.) — never as a default habit.
 • Be plain and direct. If you wouldn't say it to a friend, don't write it.
@@ -966,7 +1135,7 @@ ${mode === "reflective"
   ? `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`
   : `• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`}`;
 
-  return basePrompt + modeBlock + finalGuardrail;
+  return contextBlock + basePrompt + modeBlock + finalGuardrail;
 }
 
 // Export for testing

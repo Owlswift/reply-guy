@@ -1,6 +1,7 @@
 import { Page } from "playwright";
 import { sessionManager } from "../core/sessionManager";
 import { randomDelayMs } from "../behavior/delays";
+import { log } from "../utils/logger";
 
 function randomDelay(min: number, max: number): number {
   return randomDelayMs(min, max);
@@ -34,4 +35,7 @@ export async function scrollTimeline(page: Page): Promise<void> {
     await page.mouse.wheel(0, 600 + Math.random() * 400);
     await page.waitForTimeout(randomDelay(600, 1500));
   }
+
+  const scrollY = await page.evaluate(() => window.scrollY).catch(() => null);
+  log(`[Scroll] Current scroll position: ${scrollY ?? "unknown"}px`);
 }

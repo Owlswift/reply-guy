@@ -105,7 +105,13 @@ export class ChatGPTClient {
       "error occurred",
       "something went wrong while generating the response",
       "help.openai.com",
-      "if this issue persists"
+      "if this issue persists",
+      // ChatGPT's mid-stream failure bubble — scraped via textContent this
+      // reads as "Error in message streamRetry" (the message and the Retry
+      // button label with no space between them). Without this pattern it
+      // passes every other check (>10 chars, no HTML, no other keyword
+      // match) and gets treated as a real reply and posted as-is.
+      "error in message stream"
     ];
 
     const lowerReply = reply.toLowerCase();

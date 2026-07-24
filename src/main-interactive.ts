@@ -8,16 +8,18 @@ import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { hasReplied } from "./storage/repliedTweets";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { isSelfReplyContinuation } from "./decision/threadContinuation";
+import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
+import { isBlockedTweetId } from "./decision/blockedTweetIds";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet, TweetDetails } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
 import { markNotificationReplied } from "./storage/seenNotifications";
+import { setScrollY } from "./timeline/state";
 import { stats } from "./stats/runtime";
-import { getNewestTweetId, setNewestTweetId, setScrollY, getScrollY } from "./timeline/state";
 import { ChatGPTClient } from "./ai/chatgpt";
 import { classifyTweet } from "./ai/classifyTweet";
 import { validateReply } from "./personality/validator";
@@ -40,9 +42,49 @@ import {
   getPostReplyPause,
   maybeInterruption,
   getReplyRatio,
+  setSpeedMultiplier,
 } from "./behavior/scheduler";
 
 const DAILY_LIMIT = 300;
+
+// ─── CLI flags ─────────────────────────────────────────────────────────────
+// Plain numeric flags rather than env vars, so they're easy to change
+// per-run: `tsx src/main-interactive.ts --speed=0.5 --scroll=4000`.
+// Accepts both `--name=value` and `--name value`. Returns null if the flag
+// is omitted or unparseable.
+function parseNumericFlag(argv: string[], name: string): number | null {
+  const prefix = `--${name}=`;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg) continue;
+
+    if (arg.startsWith(prefix)) {
+      return parseFloat(arg.slice(prefix.length));
+    }
+    if (arg === `--${name}` && argv[i + 1]) {
+      return parseFloat(argv[i + 1]!);
+    }
+  }
+  return null;
+}
+
+// A global multiplier on every pacing delay in scheduler.ts: --speed=0.5
+// halves them (faster, less human-like cover), --speed=2 doubles them
+// (slower, more cover). Left at the default 1x if omitted or unparseable.
+const speedFlag = parseNumericFlag(process.argv.slice(2), "speed");
+if (speedFlag !== null) {
+  setSpeedMultiplier(speedFlag);
+  console.log(chalk.dim(`[speed] Pacing multiplier set to ${speedFlag}x`));
+}
+
+// Starting scroll position (pixels) on the notification feed, so a run can
+// jump straight to wherever a previous run left off instead of always
+// starting at the top and re-scanning everything above it. Applied once,
+// right after the feed first loads (see main()) — also seeds
+// timeline/state.ts's scrollY so goBack()/returnToTimeline()'s restore
+// logic (BrowserNavigator.ts) has something real to return to if the very
+// first tweet opened from this position gets skipped.
+const scrollFlag = parseNumericFlag(process.argv.slice(2), "scroll");
 
 // Playwright occasionally races its own internal handling of a native
 // browser dialog (window.confirm/alert/beforeunload) against the dialog
@@ -120,7 +162,17 @@ async function finalizeManualReply(
   details: TweetDetails,
   result: ManualReplyResult
 ): Promise<void> {
-  if (!result.posted) return;
+  if (!result.posted) {
+    // The operator was offered "answer it myself" but never actually posted
+    // a reply (left it blank, or didn't respond within postManualReply()'s
+    // own timeout). This still has to be recorded as handled — otherwise
+    // nothing marks the tweet seen, X's notification feed keeps showing it
+    // unread, and the exact same tweet gets re-enqueued and re-prompted
+    // every single watch cycle forever.
+    markReplied(item.id);
+    markNotificationReplied(item.id);
+    return;
+  }
   markReplied(item.id);
   markNotificationReplied(item.id);
   stats.posted++;
@@ -184,6 +236,17 @@ async function main() {
   log("Navigating to notifications...");
   await notificationSource.getTweets(page, navigator);
 
+  // --scroll=<px> — jump straight to a previous run's scroll position
+  // instead of always starting at the top and re-scanning everything above
+  // it. Also seeds timeline/state.ts's scrollY so the very first tweet
+  // opened from here restores back to this position (not 0) if skipped.
+  if (scrollFlag !== null && Number.isFinite(scrollFlag) && scrollFlag > 0) {
+    await page.evaluate((y) => window.scrollTo(0, y), scrollFlag).catch(() => {});
+    setScrollY(scrollFlag);
+    log(`[scroll] Jumped to starting scroll position ${scrollFlag}px`);
+    await page.waitForTimeout(2000);
+  }
+
   // Tracks consecutive "no new notifications, scroll for older" cycles.
   // Five scrolls finding nothing is unusual enough that it's worth
   // double-checking we're actually still on the filtered posts feed
@@ -197,11 +260,31 @@ async function main() {
     consecutiveEmptyScrolls++;
     if (consecutiveEmptyScrolls < EMPTY_SCROLL_CHECK_THRESHOLD) return;
 
-    if (!page.url().includes("/i/timeline")) {
-      log(`No new posts after ${consecutiveEmptyScrolls} scrolls and not on /i/timeline (currently ${page.url()}) — re-navigating via notifications.`);
-      await navigator.navigateToTimeline();
+    if (page.url().includes("/i/timeline")) {
+      consecutiveEmptyScrolls = 0;
+      return;
     }
-    consecutiveEmptyScrolls = 0;
+
+    log(`No new posts after ${consecutiveEmptyScrolls} scrolls and not on /i/timeline (currently ${page.url()}) — re-navigating via notifications.`);
+    // navigateToTimeline() now reports whether it actually landed on a
+    // working feed (and tries dismissing a blocking modal/overlay once if
+    // the first attempt didn't land) — this used to be ignored, so a stuck
+    // dialog could make every attempt silently no-op while the counter kept
+    // resetting to 0 regardless, scrolling uselessly for hours between
+    // checks instead of ever recovering.
+    const landed = await navigator.navigateToTimeline();
+
+    if (landed) {
+      consecutiveEmptyScrolls = 0;
+      return;
+    }
+
+    log(`Still not on /i/timeline after re-navigation attempt (currently ${page.url()}) — will recheck on the very next scroll instead of waiting ${EMPTY_SCROLL_CHECK_THRESHOLD} more.`);
+    // Don't reset to 0 — leave it one below the threshold so the next
+    // single scroll re-triggers this check immediately, retrying every
+    // scroll while stuck rather than burning another full 5-scroll cycle
+    // per retry.
+    consecutiveEmptyScrolls = EMPTY_SCROLL_CHECK_THRESHOLD - 1;
   }
 
   while (stats.posted < DAILY_LIMIT) {
@@ -287,6 +370,14 @@ async function main() {
           continue;
         }
 
+        // Specific blocked tweet ids (decision/blockedTweetIds.ts) — a
+        // one-off tweet to never engage with, regardless of author or content.
+        if (isBlockedTweetId(tweet.id)) {
+          log(`Tweet ${tweet.id} is a specifically blocked tweet id — skipping.`);
+          markReplied(tweet.id);
+          continue;
+        }
+
         // Self-reply thread continuations (threadContinuation.ts) — the
         // author replying to their own earlier tweet. X shows each part of
         // a thread as its own notification/timeline entry with a unique
@@ -301,9 +392,15 @@ async function main() {
 
         // Blocked handles (scoreTweet.ts) — never reply to these authors,
         // regardless of priority/urgent status. Takes precedence over
-        // every other check below.
+        // every other check below. This also covers REPOSTS of a blocked
+        // author's content: for a repost, X's own DOM shows the ORIGINAL
+        // author's name/handle as the article's byline (the "X reposted"
+        // label is a separate line above it, not part of author/username),
+        // so tweet.author/tweet.username here already reflect the original
+        // (possibly blocked) author — no separate repost-specific check
+        // needed, just a clearer log so it's visible this is what happened.
         if (isBlockedHandle(tweet.author, tweet.username)) {
-          log(`Tweet ${tweet.id} from blocked handle ${tweet.author} — skipping.`);
+          log(`Tweet ${tweet.id}${tweet.isRepost ? " (a repost)" : ""} from blocked handle ${tweet.author} — skipping.`);
           markReplied(tweet.id);
           continue;
         }
@@ -451,6 +548,18 @@ async function main() {
             continue;
           }
 
+          // Specific blocked tweet ids (decision/blockedTweetIds.ts) — safety
+          // net for anything already queued before this was added, or that
+          // reached the queue through a path that skips the PHASE 1 check
+          // (e.g. the low-priority deferral cache).
+          if (isBlockedTweetId(item.id)) {
+            log(`Tweet ${item.id} is a specifically blocked tweet id — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
+            dequeue();
+            continue;
+          }
+
           // Gated handles (ALWAYS_PROMPT_HANDLES in posterProfiles.ts) — if
           // the operator previously chose "skip" for this exact tweet when
           // prompted, never re-open or re-prompt it.
@@ -493,10 +602,8 @@ async function main() {
             continue;
           }
 
-          // Save scroll position before opening tweet
-          const currentScrollY = await page.evaluate(() => window.scrollY);
-          setScrollY(currentScrollY);
-
+          // Scroll position is now saved inside BrowserNavigator.openTweet()
+          // itself — centralized so every caller gets it, not just this one.
           await navigator.openTweet(item.url);
 
           // Skip if we can't reply
@@ -513,6 +620,77 @@ async function main() {
           if (!details) {
             log(`Cannot extract tweet ${item.id}. Skipping.`);
             markReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Log surrounding context as it's found — no way to verify the
+          // quote-card/parent/thread DOM detection (extractTweet.ts) is
+          // actually firing correctly on real tweets without seeing it.
+          if (details.quotedTweet) {
+            log(`Tweet ${item.id} quotes: "${details.quotedTweet}"`);
+          }
+          if (details.parentTweet) {
+            log(`Tweet ${item.id} is a reply to: "${details.parentTweet}"`);
+          }
+          if (details.previousThreadPost) {
+            log(`Tweet ${item.id} continues previous post: "${details.previousThreadPost}"`);
+          }
+
+          // Quoting or replying to a blocked handle's content (scoreTweet.ts's
+          // BLOCKED_HANDLES) — the current tweet isn't itself from a blocked
+          // author, but surfacing/engaging with a blocked author's content
+          // indirectly through a quote or a reply-to is the same thing this
+          // list exists to prevent. isBlockedHandle() only ever checked the
+          // CURRENT tweet's own author — quotedTweetHandle/parentTweetHandle
+          // (extractTweet.ts) weren't checked against it at all until now.
+          if (isBlockedHandle(details.quotedTweetHandle ?? "", details.quotedTweetHandle ?? "")) {
+            log(`Tweet ${item.id} quotes blocked handle ${details.quotedTweetHandle} — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+          if (isBlockedHandle(details.parentTweetHandle ?? "", details.parentTweetHandle ?? "")) {
+            log(`Tweet ${item.id} is a reply to blocked handle ${details.parentTweetHandle} — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Engagement-bait quoted tweets (decision/blockedQuotedTweets.ts) —
+          // replying to whoever quoted one of these adds nothing, it's just
+          // off-topic engagement farming. Skip before any further processing.
+          if (isBlockedQuotedTweet(details.quotedTweet)) {
+            log(`Tweet ${item.id} quotes a blocked bait tweet — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Re-check staleness with the real, live numbers now that the
+          // tweet is actually open. The notification-stage check
+          // (shouldSkipDueToAgeAndReplies, PHASE 1) only ever runs for
+          // tweets discovered through the normal notification feed — a
+          // tweet pulled back in from the low-priority deferral cache
+          // (storage/lowPriorityTweets.ts) skips that check entirely, since
+          // that cache only ever stores a bare URL with no age/reply data to
+          // check against. Without this, a post that was low-priority when
+          // first seen could sit deferred for hours and come back stale (old,
+          // hundreds of replies deep) with nothing left to catch it before
+          // it gets opened and replied to.
+          const staleAgeMinutes = (Date.now() - details.latestSegmentAt) / 60_000;
+          const staleHandle = details.handle || item.author;
+          if (isStaleByAgeAndReplies(details.replies, staleAgeMinutes, isUrgent(staleHandle, staleHandle))) {
+            log(`Tweet ${item.id} is stale (${details.replies} replies, ${Math.round(staleAgeMinutes)}m old) — skipping.`);
+            markReplied(item.id);
+            markNotificationReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
             continue;
@@ -669,6 +847,7 @@ async function main() {
             if (decision === "skip") {
               log(`No response for image tweet ${item.id} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping.`);
               markReplied(item.id);
+              markNotificationReplied(item.id);
               await navigator.returnToTimeline();
               dequeue();
               continue;
@@ -726,18 +905,28 @@ async function main() {
             // Use ChatGPT for other tweet types. Format-valid and non-duplicate
             // isn't enough on its own — judge whether the draft is actually
             // worth posting (adds insight, humor, etc., not just "I agree").
-            // Regenerate within the same 3-attempt budget if it isn't, and
+            // Regenerate within the same attempt budget if it isn't, and
             // fall back to the best-scoring attempt if none clear the bar,
             // rather than throwing away a slow ChatGPT round-trip entirely.
+            // Capped at 2 attempts (was 3) — each attempt is a full ChatGPT
+            // browser round-trip plus a separate local-model judgeReplies
+            // call (and usually a separate analyzeTweet call before it), so
+            // a third attempt was one of the largest and most variable
+            // contributors to multi-minute reply times.
             let bestReply = "";
             let bestScore = -1;
 
-            for (let i = 0; i < 3; i++) {
+            for (let i = 0; i < 2; i++) {
               try {
                 reply = await chatgpt.generateReply({
                   tweet: tweetText,
                   relationship: "stranger",
-                  memories
+                  memories,
+                  context: {
+                    ...(details.quotedTweet ? { quotedTweet: details.quotedTweet } : {}),
+                    ...(details.parentTweet ? { parentTweet: details.parentTweet } : {}),
+                    ...(details.previousThreadPost ? { previousThreadPost: details.previousThreadPost } : {}),
+                  }
                 });
               } catch (err) {
                 log(`ChatGPT attempt ${i + 1} failed: ${err}`);
@@ -821,9 +1010,15 @@ async function main() {
         // pending phase above (including the thread-completeness recheck,
         // which only matters there since that's what's actually sent to
         // ChatGPT) — this extraction is purely to re-read current text for
-        // display/reading-time simulation before posting the existing
-        // item.draft. No recheck-and-wait here: the draft is already
-        // decided, so waiting at this point delays posting for no benefit.
+        // display before posting the existing item.draft. No recheck-and-wait
+        // here: the draft is already decided, so waiting at this point delays
+        // posting for no benefit.
+        //
+        // This used to also re-run getReadingTime() here — a second full
+        // 15-40s "reading" pause on top of the one already paid in the
+        // pending phase, timing something (reading the tweet) that had
+        // already happened. Dropped it; the brief thinking-time pause below
+        // is enough of a "glance before posting" beat on its own.
         const details = await extractCurrentTweet(page);
         if (!details) {
           log(`Cannot extract tweet ${item.id}. Skipping.`);
@@ -833,12 +1028,9 @@ async function main() {
           continue;
         }
 
-        // Reading time — scales with fatigue
         const tweetText = details.fullText || details.text || item.text;
-        const readTime = getReadingTime(tweetText);
-        await page.waitForTimeout(readTime);
 
-        // Thinking time — scales with fatigue
+        // Thinking time — brief pause before posting
         const thinkTime = getThinkingTime();
         if (thinkTime > 0) {
           await page.waitForTimeout(thinkTime);
@@ -951,14 +1143,11 @@ async function main() {
         // PHASE 5: RETURN TO NOTIFICATIONS + pause
         // ============================================================
         log(`=== PHASE: RETURN TO NOTIFICATIONS ===`);
+        // Scroll restoration now happens inside BrowserNavigator's
+        // goBack()/returnToTimeline() themselves (see restoreScrollPosition
+        // there) — centralized so every skip branch gets it too, not just
+        // this post-reply path.
         await notificationSource.returnToPostsFeed(navigator);
-
-        // Restore scroll position after returning
-        const savedScrollY = getScrollY();
-        if (savedScrollY > 0) {
-          await page.evaluate((y) => window.scrollTo(0, y), savedScrollY);
-          log(`Restored scroll position to ${savedScrollY}px`);
-        }
 
         // Post-reply pause — scales with fatigue
         const postPause = getPostReplyPause();

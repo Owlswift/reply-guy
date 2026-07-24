@@ -1,6 +1,7 @@
 import { Page } from "playwright";
 import { sessionManager } from "../core/sessionManager";
 import { log } from "../utils/logger";
+import { getScrollY, setScrollY } from "../timeline/state";
 
 /**
  * BrowserNavigator - Single owner of all Playwright navigation
@@ -122,30 +123,116 @@ export class BrowserNavigator {
    * whenever refreshSession() called it. Go through /notifications and
    * click the "New post notifications for..." card instead, exactly like
    * openNotificationFeed() and returnToTimeline() already do.
+   *
+   * Returns whether it actually landed on a working feed page. A caller
+   * that ignores this (most navigateToTimeline() callsites just `await` it)
+   * gets the exact same behavior as before. checkStillOnFeedAfterEmptyScrolls
+   * (main-interactive.ts) is the one caller that needs to know it failed —
+   * previously it just called this and moved on regardless of outcome, so a
+   * blocking modal/dialog could make every single attempt silently no-op
+   * and the loop would scroll uselessly for hours between checks instead of
+   * ever actually getting unstuck.
    */
-  async navigateToTimeline(): Promise<void> {
+  async navigateToTimeline(): Promise<boolean> {
     this.assertNoActiveSession();
 
     log("[Navigator] Navigating to notifications (i/timeline direct goto is rejected by X)");
     await this.goToNotificationFeedDirect();
 
-    // Wait for articles to render — don't wait for networkidle because
-    // X.com maintains persistent WebSocket connections for real-time feed
-    // updates, meaning network idle is never truly reached on the feed page.
+    if (await this.landedOnWorkingFeed()) {
+      return true;
+    }
+
+    // Didn't land cleanly — a blocking modal/popup/overlay (a "something
+    // went wrong" dialog, a confirmation prompt, a cookie/consent sheet,
+    // etc.) is the most likely reason the click-through above silently did
+    // nothing. Try to clear it and retry once before giving up.
+    const dismissed = await this.dismissBlockingOverlay();
+    if (dismissed) {
+      log("[Navigator] Dismissed a blocking overlay — retrying navigation to notifications.");
+      await this.goToNotificationFeedDirect();
+    }
+
+    return this.landedOnWorkingFeed();
+  }
+
+  /**
+   * Whether the page actually landed somewhere usable after a navigation
+   * attempt — a feed URL AND actual article content, not just a URL match
+   * (a modal can sit on top of /notifications and still count as "on the
+   * right page" by URL alone).
+   */
+  private async landedOnWorkingFeed(): Promise<boolean> {
+    if (!this.isOnFeedPage()) return false;
     try {
       await this.page.waitForSelector("article", { timeout: 15000 });
+      return true;
     } catch {
-      log("[Navigator] No articles found on timeline, continuing anyway");
+      log("[Navigator] On a feed URL but no articles rendered — treating as not landed.");
+      return false;
     }
+  }
+
+  /**
+   * Look for a modal, popup, confirmation dialog, or overlay sitting on top
+   * of the page and blocking interaction, and try to dismiss it. Returns
+   * whether something was found (regardless of whether dismissal actually
+   * worked — the caller re-checks landedOnWorkingFeed() either way).
+   */
+  private async dismissBlockingOverlay(): Promise<boolean> {
+    const overlay = this.page.locator(
+      '[role="dialog"], [data-testid="mask"], [data-testid="sheetDialog"], [aria-modal="true"]'
+    ).first();
+
+    const present = await overlay.isVisible().catch(() => false);
+    if (!present) return false;
+
+    log("[Navigator] Blocking overlay detected — attempting to dismiss.");
+
+    // Escape closes the large majority of X's dialogs/sheets/toasts.
+    await this.page.keyboard.press("Escape").catch(() => {});
+    if (!(await overlay.isVisible().catch(() => false))) return true;
+
+    // Explicit close button next (X's own close icon, or a generic one).
+    const closeButton = this.page.locator(
+      '[data-testid="app-bar-close"], button[aria-label="Close"], div[aria-label="Close"]'
+    ).first();
+    if (await closeButton.isVisible().catch(() => false)) {
+      await closeButton.click().catch(() => {});
+      if (!(await overlay.isVisible().catch(() => false))) return true;
+    }
+
+    // Last resort: click the dimmed backdrop behind the dialog, which
+    // dismisses most sheet/modal overlays the same way clicking outside
+    // them would.
+    const backdrop = this.page.locator('[data-testid="mask"]').first();
+    if (await backdrop.isVisible().catch(() => false)) {
+      await backdrop.click({ position: { x: 5, y: 5 } }).catch(() => {});
+    }
+
+    return true;
   }
 
 
   /**
-   * Open a specific tweet
+   * Open a specific tweet.
+   *
+   * Saves the current scroll position (timeline/state.ts) before navigating
+   * away, so goBack()/returnToTimeline() can restore it afterward regardless
+   * of whether this tweet ends up replied to or skipped. This used to be the
+   * caller's job (main-interactive.ts saved it manually right before calling
+   * this) — centralized here instead so every caller gets it automatically,
+   * including ones that were missing it entirely (workers/browserWorker.ts
+   * called this with no scroll-save at all, which would have restored
+   * whatever main-interactive.ts's own PHASE 3 had last saved instead of
+   * this worker's actual position).
    */
   async openTweet(url: string): Promise<{ url: string; title: string }> {
     this.assertNoActiveSession();
-    
+
+    const currentScrollY = await this.page.evaluate(() => window.scrollY).catch(() => 0);
+    setScrollY(currentScrollY);
+
     log(`[Navigator] Opening tweet: ${url}`);
     await this.page.goto(url, {
       waitUntil: "domcontentloaded",
@@ -201,9 +288,57 @@ export class BrowserNavigator {
       log("[Navigator] Articles did not appear within timeout, continuing anyway");
     }
 
+    await this.restoreScrollPosition();
+
     // Human-like pause after landing back
     const delay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;
     await this.page.waitForTimeout(delay);
+  }
+
+  /**
+   * Restore the scroll position saved (timeline/state.ts's setScrollY,
+   * called right before openTweet()) before this tweet was opened.
+   *
+   * page.goBack() alone does NOT reliably restore it on X — X's SPA
+   * re-renders the feed route on history restoration rather than doing a
+   * true browser bfcache restore, so scroll silently resets to the top
+   * regardless of what the browser's own back button would normally do.
+   *
+   * This used to only run after a successful reply post (main-interactive.ts
+   * PHASE 5), never after any of the many SKIP branches (blocked handle,
+   * stale, image gate, generation failure, etc.) that also call goBack() or
+   * returnToTimeline() — and skips vastly outnumber successful replies in a
+   * real run. The result: nearly every skip silently reset scroll to the
+   * top, so the next watch cycle re-scanned the same already-replied
+   * notifications from scratch instead of continuing from where it left
+   * off — looking like the whole loop "started over" on every skip.
+   * Centralizing it here means every caller of goBack()/returnToTimeline()
+   * gets it automatically, instead of each call site having to remember to
+   * restore it individually.
+   */
+  private async restoreScrollPosition(): Promise<void> {
+    const savedScrollY = getScrollY();
+    if (savedScrollY <= 0) return;
+
+    await this.page.evaluate((y) => window.scrollTo(0, y), savedScrollY).catch(() => {});
+
+    // Read back what the scroll ACTUALLY landed on rather than assuming the
+    // target was reached. X's feed is virtualized/lazy-loaded — right after
+    // goBack(), only a small batch of content has re-rendered (we only wait
+    // for the FIRST article to appear, not for the page to regrow to its
+    // previous scrollable height), so a big jump silently clamps to whatever
+    // the currently-loaded height allows. Logging the target unconditionally
+    // as "restored" was a lie by omission: the very next openTweet() call
+    // reads this clamped, smaller value as the new "current" position and
+    // saves it as the next baseline, quietly ratcheting the resume point
+    // down on every skip instead of holding steady.
+    const actualScrollY = await this.page.evaluate(() => window.scrollY).catch(() => null);
+
+    if (actualScrollY !== null && Math.abs(actualScrollY - savedScrollY) > 50) {
+      log(`[Navigator] Scroll restore clamped — wanted ${savedScrollY}px, landed on ${actualScrollY}px (feed likely hasn't re-rendered that far down yet).`);
+    } else {
+      log(`[Navigator] Restored scroll position to ${actualScrollY ?? savedScrollY}px`);
+    }
   }
 
   /**
@@ -246,6 +381,8 @@ export class BrowserNavigator {
     } catch {
       log("[Navigator] Articles did not appear within timeout, continuing anyway");
     }
+
+    await this.restoreScrollPosition();
 
     // Human-like pause after landing back on the feed
     const delay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;

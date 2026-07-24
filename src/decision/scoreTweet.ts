@@ -54,7 +54,8 @@ const URGENT_HANDLES: string[] = [
   "@gumvape",
   "@rachcorrine",
   "@SIGMAPROFESSOR",
-  "@YourPrimePath"
+  "@YourPrimePath",
+  "@yxng_samyaa"
 ];
 
 const URGENT_BONUS = 1000; // massive score boost for urgent handles
@@ -62,10 +63,12 @@ const URGENT_BONUS = 1000; // massive score boost for urgent handles
 /**
  * Top-priority handle — takes precedence over every other handle,
  * including other urgent handles. Always sorts first in the queue.
+ * Always leave 2 responses to kemi_adeleke's posts
 */
 export const TOP_PRIORITY_HANDLES: string[] = [
   "@realmfpriya",
   "@kemi_adeleke1",
+  "@itssthyherinme",
   "@bluewdrift",
   "@WrittenBy_SS",
   "@FitWithDrSam",
@@ -79,7 +82,9 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@artfuIchaos",
   "@PathOfMen_",
   "@Laiiyylaa",
-  "@ErikDavis"
+  "@ErikDavis",
+  "@miiagarro",
+  "@TyyTyra"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -141,7 +146,8 @@ export const LOW_PRIORITY_HANDLES: string[] = [
  */
 export const BLOCKED_HANDLES: string[] = [
   "@Mario_Sneh",
-  "@unfairleverage"
+  "@unfairleverage",
+  "@TyyTyra"
 ];
 
 /**
@@ -347,17 +353,27 @@ export function scoreTweet(tweet: TimelineTweet): number {
  *   - Replies > 50 → skip regardless of age (a reply that deep in a
  *     thread won't get seen, no matter how fresh the tweet still is)
  *   - Age > 12 hr → skip regardless of reply count
+ *
+ * Pulled out from shouldSkipDueToAgeAndReplies() so any caller that only
+ * has the raw numbers (not a full TimelineTweet) — e.g. a tweet re-checked
+ * right before opening it, after it's already been sitting in the queue or
+ * the low-priority deferral cache for a while — can reuse the exact same
+ * thresholds instead of a second, driftable copy of "50" and "720".
  */
+export function isStaleByAgeAndReplies(replies: number, ageMinutes: number, bypassStaleCheck: boolean): boolean {
+  if (bypassStaleCheck) return false;
+  if (replies > 50) return true;
+  if (ageMinutes > 720) return true; // > 12 hr → skip
+  return false;
+}
+
 export function shouldSkipDueToAgeAndReplies(tweet: TimelineTweet): boolean {
   // Urgent handles (e.g. @WatcherGuru) are never skipped due to age/replies
-  if (isUrgent(tweet.author, tweet.username)) return false;
-
-  if (tweet.replies > 50) return true;
+  const bypass = isUrgent(tweet.author, tweet.username);
 
   const now = Date.now();
   const ageMs = now - tweet.createdAt.getTime();
   const ageMinutes = Math.max(0, ageMs / 60_000);
 
-  if (ageMinutes > 720) return true;                 // > 12 hr → skip
-  return false;
+  return isStaleByAgeAndReplies(tweet.replies, ageMinutes, bypass);
 }
