@@ -43,6 +43,18 @@ export interface TweetDetails {
   // author's own thread that led into this one, distinct from a genuine
   // reply-to-someone-else.
   previousThreadPost?: string;
+  // Whether the anchor is the FIRST tweet in its own same-author chain, or
+  // a middle/later segment. False means this notification's own tweet
+  // should never get a reply of its own — main-interactive.ts redirects to
+  // rootId/rootUrl instead. Replying to whichever segment happened to
+  // trigger the notification (instead of always the root) is exactly the
+  // "why does this bot reply to every paragraph of the same story"
+  // behavior that's one of the most obvious tells that it's a bot.
+  isRoot: boolean;
+  // The root tweet's id/url of this same-author chain, only set when
+  // isRoot is false (i.e. there's actually somewhere else to redirect to).
+  rootId?: string;
+  rootUrl?: string;
 }
 
 const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
@@ -223,23 +235,54 @@ export async function extractCurrentTweet(
   }
   const rootHandle = anchor.handle;
 
-  // The tweet immediately above the anchor, if any — either the tweet it's
-  // directly replying to (a different author: parentTweet) or an earlier
-  // segment of the author's own thread (same author: previousThreadPost).
-  // Only the immediate one; deeper chains are out of scope for now.
+  // Walk backward from the anchor to find the true ROOT of a same-author
+  // thread chain — not just the immediate predecessor. A middle/last
+  // segment must redirect to the root instead of ever getting a reply of
+  // its own (see TweetDetails.isRoot / main-interactive.ts), so this needs
+  // the actual start of the chain, however many segments back that is.
+  // previousThreadPost stays the immediate prior segment specifically
+  // (context for analyzeTweet on what led into THIS segment); parentTweet
+  // is whichever different-author tweet the walk hits when the same-author
+  // run finally breaks — the whole chain's actual conversational parent,
+  // not "the tweet before this one part."
+  let rootIndex = anchorIndex;
   let parentTweet: string | undefined;
   let parentTweetHandle: string | undefined;
   let previousThreadPost: string | undefined;
-  if (anchorIndex > 0) {
-    const prevArticle = articles[anchorIndex - 1];
-    const prevParsed = prevArticle ? await readArticle(prevArticle) : null;
-    if (prevParsed && prevParsed.text) {
-      if (prevParsed.handle === rootHandle) {
-        previousThreadPost = prevParsed.text;
-      } else {
-        parentTweet = prevParsed.handle ? `${prevParsed.handle}: ${prevParsed.text}` : prevParsed.text;
-        parentTweetHandle = prevParsed.handle || undefined;
+  {
+    let i = anchorIndex - 1;
+    let checkedImmediatePredecessor = false;
+    while (i >= 0) {
+      const article = articles[i];
+      if (!article) break;
+      const parsed = await readArticle(article);
+      if (!parsed || !parsed.text) break;
+
+      if (parsed.handle === rootHandle && Math.abs(parsed.time - anchor.time) <= TIME_WINDOW_MS) {
+        if (!checkedImmediatePredecessor) previousThreadPost = parsed.text;
+        rootIndex = i;
+        checkedImmediatePredecessor = true;
+        i--;
+        continue;
       }
+
+      // Different author, or too far outside the window — the chain's
+      // actual conversational parent. Stop walking back.
+      parentTweet = parsed.handle ? `${parsed.handle}: ${parsed.text}` : parsed.text;
+      parentTweetHandle = parsed.handle || undefined;
+      break;
+    }
+  }
+
+  const isRoot = rootIndex === anchorIndex;
+  let rootId: string | undefined;
+  let rootUrl: string | undefined;
+  if (!isRoot) {
+    const rootArticle = articles[rootIndex];
+    const id = rootArticle ? await readArticleStatusId(rootArticle) : null;
+    if (id) {
+      rootId = id;
+      rootUrl = `https://x.com/${rootHandle.replace(/^@/, "")}/status/${id}`;
     }
   }
 
@@ -317,10 +360,13 @@ export async function extractCurrentTweet(
     imageUrls,
     latestSegmentAt,
     replies,
+    isRoot,
     ...(quotedTweet ? { quotedTweet: quotedTweet.text } : {}),
     ...(quotedTweet?.handle ? { quotedTweetHandle: quotedTweet.handle } : {}),
     ...(parentTweet ? { parentTweet } : {}),
     ...(parentTweetHandle ? { parentTweetHandle } : {}),
-    ...(previousThreadPost ? { previousThreadPost } : {})
+    ...(previousThreadPost ? { previousThreadPost } : {}),
+    ...(rootId ? { rootId } : {}),
+    ...(rootUrl ? { rootUrl } : {})
   };
 }

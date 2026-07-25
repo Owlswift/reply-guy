@@ -26,5 +26,6 @@ export interface TimelineTweet {
   isReply?: boolean;
   replyingToHandle?: string;
   isRepost?: boolean;
+  reposterHandle?: string;
   isPinned?: boolean;
 }

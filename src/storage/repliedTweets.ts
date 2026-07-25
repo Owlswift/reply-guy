@@ -3,21 +3,39 @@ import path from "path";
 
 const FILE = path.join(process.cwd(), "repliedTweets.json");
 
-// In-memory cache
-let repliedCache: Set<string> | null = null;
+// Maps tweet id -> the reason it was marked done. This used to be a plain
+// Set<string> with no reason at all — every markReplied() call site
+// (dozens of them: blocked handle, image skip, stale/saturated, "is a
+// reply not an original post", review handle, thread dedup, an ACTUAL
+// posted reply, etc.) called the same function regardless of what
+// actually happened, so hasReplied()/"already replied" never meant "we
+// posted something" — it only ever meant "we're done deciding about this,"
+// and there was no way to look back and tell which of those two it was.
+// That's exactly what looked like the bot silently "lying" that it had
+// replied to posts it had only skipped.
+let repliedCache: Map<string, string> | null = null;
 
-function load(): Set<string> {
+function load(): Map<string, string> {
   if (repliedCache) {
     return repliedCache;
   }
 
   if (!fs.existsSync(FILE)) {
-    repliedCache = new Set();
+    repliedCache = new Map();
     return repliedCache;
   }
 
   const data = JSON.parse(fs.readFileSync(FILE, "utf8"));
-  repliedCache = new Set(data);
+
+  // Transparently migrate the old format (a plain array of ids, no
+  // reasons) — anything recorded before this change just gets a generic
+  // reason instead of losing its "already handled" status entirely.
+  if (Array.isArray(data)) {
+    repliedCache = new Map(data.map((id: string) => [id, "recorded before reason-tracking existed"]));
+  } else {
+    repliedCache = new Map(Object.entries(data));
+  }
+
   return repliedCache;
 }
 
@@ -25,7 +43,7 @@ function save() {
   if (repliedCache) {
     fs.writeFileSync(
       FILE,
-      JSON.stringify([...repliedCache], null, 2)
+      JSON.stringify(Object.fromEntries(repliedCache), null, 2)
     );
   }
 }
@@ -34,8 +52,17 @@ export function hasReplied(id: string): boolean {
   return load().has(id);
 }
 
-export function markReplied(id: string): void {
+/**
+ * The reason this tweet was marked done, if any — e.g. "posted a reply",
+ * "blocked handle", "has image(s), SKIP_IMAGE_TWEETS is on". Undefined if
+ * the tweet was never marked at all.
+ */
+export function getRepliedReason(id: string): string | undefined {
+  return load().get(id);
+}
+
+export function markReplied(id: string, reason: string = "reason not recorded (call site not yet updated)"): void {
   const ids = load();
-  ids.add(id);
+  ids.set(id, reason);
   save();
 }

@@ -73,16 +73,29 @@ const KEYWORDS: KeywordMap = {
   ],
 };
 
+// Genuine greeting/well-wish tweets lead with the greeting itself ("Good
+// morning!", "Blessed Sunday to all"). Their keyword patterns are unanchored
+// substring matches, so checking the whole tweet let a long story that
+// merely quotes one of these phrases in dialogue somewhere in the middle
+// (e.g. a character saying "Good afternoon.") get misclassified the same as
+// a trivial greeting — and routed to the manual-reply-only path instead of
+// the real AI pipeline, discarding actual content if nobody happens to type
+// a reply within the timeout. Restricting the check to the tweet's opening
+// keeps real greetings (which lead with the phrase) matching, while the
+// same phrase buried deep in a narrative no longer counts.
+const GREETING_ANCHOR_WINDOW = 60;
+
 export function classifyTweet(text: string): TweetCategory {
   const t = text.trim();
+  const opening = t.slice(0, GREETING_ANCHOR_WINDOW);
 
   // Check patterns in priority order
   // Well-wish and greeting are highest priority — short auto-replies
   for (const pattern of KEYWORDS.well_wish) {
-    if (pattern.test(t)) return "well_wish";
+    if (pattern.test(opening)) return "well_wish";
   }
   for (const pattern of KEYWORDS.greeting) {
-    if (pattern.test(t)) return "greeting";
+    if (pattern.test(opening)) return "greeting";
   }
   for (const pattern of KEYWORDS.meme) {
     if (pattern.test(t)) return "meme";

@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { selectWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
+import { promptChoiceWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
 
 export type ImageDecision = "myself" | "chatgpt" | "skip";
 
@@ -17,7 +17,7 @@ export async function promptImageDecision(
   console.log(chalk.yellow(`   "${tweetText}"\n`));
   console.log(chalk.dim(`   (no answer in ${PROMPT_TIMEOUT_MS / 1000}s — skipping automatically)`));
 
-  return selectWithTimeout<ImageDecision>(
+  return promptChoiceWithTimeout<ImageDecision>(
     "How do you want to handle this tweet?",
     [
       { title: "Answer it myself", value: "myself" },

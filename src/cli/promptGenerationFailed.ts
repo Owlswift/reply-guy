@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { selectWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
+import { promptChoiceWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
 
 export type GenerationFailedDecision = "myself" | "skip";
 
@@ -18,7 +18,7 @@ export async function promptGenerationFailedDecision(
   console.log(chalk.yellow(`   "${tweetText}"\n`));
   console.log(chalk.dim(`   (no answer in ${PROMPT_TIMEOUT_MS / 1000}s — skipping automatically)`));
 
-  return selectWithTimeout<GenerationFailedDecision>(
+  return promptChoiceWithTimeout<GenerationFailedDecision>(
     "How do you want to handle this tweet?",
     [
       { title: "Answer it myself", value: "myself" },

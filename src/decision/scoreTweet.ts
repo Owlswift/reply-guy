@@ -86,7 +86,8 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@miiagarro",
   "@TyyTyra",
   "@MegOfficiall",
-  "@jas_d_barbie"
+  "@jas_d_barbie",
+  "@Miranizimmm"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first

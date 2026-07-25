@@ -57,7 +57,7 @@ Status: ${DRY_RUN ? "HUMAN APPROVAL - NOT POSTED" : "READY TO POST"}
 
     if (success) {
       // Mark as replied
-      markReplied(tweet.id);
+      markReplied(tweet.id, "posted a reply");
     }
 
     return success;

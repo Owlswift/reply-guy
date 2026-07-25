@@ -11,6 +11,15 @@ cd "$(dirname "$0")/.."
 
 RESTART_DELAY_SECONDS=5
 
+# Hold the Mac awake for as long as this supervisor itself is alive (tied to
+# this script's own PID via -w, so it releases automatically whenever the
+# supervisor exits, restart delay included). Confirmed via `pmset -g log`
+# that a real outage was caused by the whole machine going into Deep Idle —
+# launchd's ensure-running.sh timer can't fire while the system is fully
+# asleep, so the crashed bot just stayed down until a human woke the Mac.
+# No amount of restart logic fixes that; the machine has to stay awake.
+caffeinate -dims -w $$ &
+
 echo "=== Echo supervisor started (restarts on any exit, ${RESTART_DELAY_SECONDS}s delay) ==="
 
 while true; do

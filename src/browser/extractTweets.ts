@@ -59,9 +59,28 @@ export async function extractTweets(
             // content resurface here as a fresh-looking notification/timeline
             // entry with the *same* underlying tweet id — without this,
             // that resurfacing looks like a brand-new post to reply to.
-            const socialContext = (article.querySelector('[data-testid="socialContext"]')?.textContent ?? "").toLowerCase();
+            const socialContextEl = article.querySelector('[data-testid="socialContext"]');
+            const socialContext = (socialContextEl?.textContent ?? "").toLowerCase();
             const isRepost = socialContext.includes("repost");
             const isPinned = socialContext.includes("pinned");
+
+            // Who actually reposted it — distinct from the article's own
+            // author/username below, which for a repost reflects the
+            // ORIGINAL tweet's author (X renders a repost as the original
+            // tweet's own byline, with this "X reposted" line separate).
+            // A blocked handle can repost someone else's (non-blocked)
+            // content — without this, only a blocked ORIGINAL author was
+            // ever caught, never a blocked REPOSTER reposting someone else.
+            // Same extraction pattern as replyingToHandle below: the
+            // reposter's name is wrapped in an anchor linking to their
+            // profile, so read the handle from that href rather than
+            // parsing display-name text.
+            let reposterHandle = "";
+            if (isRepost && socialContextEl) {
+                const reposterAnchor = socialContextEl.querySelector('a[href^="/"]');
+                const reposterHref = reposterAnchor?.getAttribute("href") ?? "";
+                reposterHandle = reposterHref.replace(/^\//, "").split("/")[0] ?? "";
+            }
 
             const author =
                 article.querySelector('[data-testid="User-Name"]')?.textContent?.trim() ?? "";
@@ -175,7 +194,8 @@ export async function extractTweets(
                 isReply,
                 isRepost,
                 isPinned,
-                ...(replyingToHandle ? { replyingToHandle } : {})
+                ...(replyingToHandle ? { replyingToHandle } : {}),
+                ...(reposterHandle ? { reposterHandle } : {})
             };
         });
     }, source);

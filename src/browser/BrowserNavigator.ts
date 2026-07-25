@@ -327,15 +327,40 @@ export class BrowserNavigator {
     // goBack(), only a small batch of content has re-rendered (we only wait
     // for the FIRST article to appear, not for the page to regrow to its
     // previous scrollable height), so a big jump silently clamps to whatever
-    // the currently-loaded height allows. Logging the target unconditionally
-    // as "restored" was a lie by omission: the very next openTweet() call
-    // reads this clamped, smaller value as the new "current" position and
-    // saves it as the next baseline, quietly ratcheting the resume point
-    // down on every skip instead of holding steady.
-    const actualScrollY = await this.page.evaluate(() => window.scrollY).catch(() => null);
+    // the currently-loaded height allows.
+    let actualScrollY = await this.page.evaluate(() => window.scrollY).catch(() => null);
 
     if (actualScrollY !== null && Math.abs(actualScrollY - savedScrollY) > 50) {
-      log(`[Navigator] Scroll restore clamped — wanted ${savedScrollY}px, landed on ${actualScrollY}px (feed likely hasn't re-rendered that far down yet).`);
+      // Clamped. A single instant jump can't out-run a virtualized list
+      // that hasn't rendered that deep yet — the browser physically has
+      // nowhere to scroll TO. Scroll incrementally instead (like a human
+      // would), pausing between steps so X's lazy-loading has a chance to
+      // grow the page, re-attempting the direct jump as it goes.
+      //
+      // Without this, every reply/skip that clamps forces the NEXT watch
+      // cycle to re-walk the entire already-handled stretch of the feed
+      // from scratch to get back to fresh content — several minutes of
+      // "All visible notifications already replied, scrolling for older
+      // posts" on every single cycle, which is exactly what looked like
+      // Echo "just scrolling and scrolling without ever replying."
+      const MAX_INCREMENTAL_STEPS = 40;
+      const CLOSE_ENOUGH_PX = 150;
+
+      for (let i = 0; i < MAX_INCREMENTAL_STEPS; i++) {
+        const current = await this.page.evaluate(() => window.scrollY).catch(() => null);
+        if (current === null || current >= savedScrollY - CLOSE_ENOUGH_PX) break;
+
+        await this.page.evaluate(() => window.scrollBy(0, 2000)).catch(() => {});
+        await this.page.waitForTimeout(350);
+        // Re-attempt the direct jump too, in case enough has now loaded.
+        await this.page.evaluate((y) => window.scrollTo(0, y), savedScrollY).catch(() => {});
+      }
+
+      actualScrollY = await this.page.evaluate(() => window.scrollY).catch(() => null);
+    }
+
+    if (actualScrollY !== null && Math.abs(actualScrollY - savedScrollY) > 50) {
+      log(`[Navigator] Scroll restore still short after incremental recovery — wanted ${savedScrollY}px, landed on ${actualScrollY}px.`);
     } else {
       log(`[Navigator] Restored scroll position to ${actualScrollY ?? savedScrollY}px`);
     }

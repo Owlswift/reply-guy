@@ -14,7 +14,7 @@
     "setup": "bash scripts/setup.sh",
     "build": "tsc",
     "evaluate": "tsx src/main.ts",
-    "test": "tsx src/test-simple.ts",
+    "test": "tsx src/testThreadDetection.ts",
     "test:db": "tsx src/test-db.ts",
     "test:decision": "tsx src/test-decision.ts",
     "test:connection": "tsx src/test-connection.ts",

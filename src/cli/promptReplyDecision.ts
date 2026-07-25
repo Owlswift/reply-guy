@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { selectWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
+import { promptChoiceWithTimeout, PROMPT_TIMEOUT_MS } from "../utils/interactivePrompt";
 
 export type ReplyDecision = "myself" | "chatgpt" | "skip" | "timeout";
 
@@ -14,11 +14,14 @@ export async function promptReplyDecision(
   author: string,
   tweetText: string
 ): Promise<ReplyDecision> {
-  console.log(chalk.magenta(`\n✋ Tweet from @${author} requires a decision:`));
+  // Callers pass details.handle, which already includes its own leading
+  // "@" (extractTweet.ts's author.match(/@\w+/)) — prepending another one
+  // here produced "@@handle" in the prompt.
+  console.log(chalk.magenta(`\n✋ Tweet from @${author.replace(/^@/, "")} requires a decision:`));
   console.log(chalk.yellow(`   "${tweetText}"\n`));
   console.log(chalk.dim(`   (no answer in ${PROMPT_TIMEOUT_MS / 1000}s — skipping automatically, but not remembered)`));
 
-  return selectWithTimeout<ReplyDecision>(
+  return promptChoiceWithTimeout<ReplyDecision>(
     "How do you want to handle this tweet?",
     [
       { title: "Answer it myself", value: "myself" },

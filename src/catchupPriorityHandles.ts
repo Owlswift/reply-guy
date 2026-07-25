@@ -109,7 +109,7 @@ async function main() {
       // uses, and sync markReplied() so future runs don't ask again either.
       if (await hasManualReply(tweetPage)) {
         log(`[Catchup] Already replied to ${post.url} (found on the page, not in Echo's log) — syncing and skipping.`);
-        markReplied(post.id);
+        markReplied(post.id, "already replied manually outside Echo's tracking (found on the page)");
         totalSkippedAlreadyReplied++;
         continue;
       }
@@ -117,6 +117,21 @@ async function main() {
       const details = await extractCurrentTweet(tweetPage);
       if (!details) {
         log(`[Catchup] Could not extract ${post.url} — skipping.`);
+        totalSkippedOther++;
+        continue;
+      }
+
+      // Never prompt on a middle/last segment of a self-thread — same rule
+      // main-interactive.ts enforces via its own thread-root redirect.
+      // scanProfileWithinWindow() returns every original post in the time
+      // window, continuations included, so without this check each part of
+      // a multi-tweet thread gets its own "requires a decision" prompt
+      // instead of only the root ever surfacing one. If the root is also
+      // due for a reply, it's either already in `posts` from this same scan
+      // (and gets its own iteration) or was already handled earlier.
+      if (!details.isRoot && details.rootId && details.rootUrl) {
+        log(`[Catchup] ${post.url} is a segment of a thread rooted at ${details.rootId} — not prompting, root handles this instead.`);
+        markReplied(post.id, `segment of a thread, root is ${details.rootUrl}`);
         totalSkippedOther++;
         continue;
       }
@@ -143,7 +158,7 @@ async function main() {
       if (decision === "myself") {
         const manualResult = await postManualReply(tweetPage, details.handle || cleanHandle);
         if (manualResult.posted) {
-          markReplied(post.id);
+          markReplied(post.id, "posted a manual reply via catch-up");
           try {
             await memoryRepo.saveMemory({
               id: "",
@@ -228,7 +243,7 @@ async function main() {
         await prepareReply(tweetPage, reply);
         const success = await clickReply(tweetPage, details.handle || cleanHandle);
         if (success) {
-          markReplied(post.id);
+          markReplied(post.id, "posted a ChatGPT-drafted reply via catch-up");
           try {
             await memoryRepo.saveMemory({
               id: "",

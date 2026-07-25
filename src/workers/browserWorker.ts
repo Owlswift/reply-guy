@@ -84,7 +84,7 @@ export async function runBrowserWorker(page: Page, navigator: BrowserNavigator):
 
       if (result.status === "posted") {
         // Mark as replied
-        markReplied(item.id);
+        markReplied(item.id, "posted a reply via the review session");
         markNotificationReplied(item.id);
         
         // Remove from queue
