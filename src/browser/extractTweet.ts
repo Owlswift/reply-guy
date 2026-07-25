@@ -28,6 +28,14 @@ export interface TweetDetails {
   // from the formatted quotedTweet string so callers can check it against
   // BLOCKED_HANDLES without having to regex-parse it back out.
   quotedTweetHandle?: string;
+  // The quoted tweet's own status id. Extracted even for a same-author
+  // quote (where quotedTweet/quotedTweetHandle below are suppressed as a
+  // likely "show this thread" preview) — a deliberate self-quote-repost of
+  // an already-replied tweet has the exact same DOM shape as that preview,
+  // and checking hasReplied() on this id is how the two get told apart:
+  // a not-yet-replied preview segment passes through untouched, while a
+  // genuine repost of already-answered content gets caught.
+  quotedTweetId?: string;
   // The tweet immediately above the anchor in the DOM — the tweet it's
   // directly replying to, when that tweet is by a DIFFERENT author. Without
   // this, a reply like "this generation is cooked" gets analyzed with no
@@ -155,7 +163,7 @@ async function readArticleStatusId(article: ReturnType<Page["locator"]>): Promis
 async function readQuotedTweet(
   article: ReturnType<Page["locator"]>,
   rootHandle: string
-): Promise<{ text: string; handle: string } | undefined> {
+): Promise<{ text?: string; handle?: string; id?: string } | undefined> {
   try {
     const textNodes = await article.locator('[data-testid="tweetText"]').all();
     if (textNodes.length < 2) return undefined;
@@ -166,15 +174,44 @@ async function readQuotedTweet(
     const quoteAuthor = (await nameNodes[1]?.textContent({ timeout: 2000 }))?.trim() ?? "";
     const quoteHandle = quoteAuthor.match(/@\w+/)?.[0] ?? "";
 
-    // Same author as the anchor — a "show this thread" preview, not a real quote.
-    if (quoteHandle && quoteHandle === rootHandle) return undefined;
-
     const quoteText = (await textNodes[1]?.textContent({ timeout: 2000 }))?.trim() ?? "";
     if (!quoteText) return undefined;
 
+    // Quote card's own status id — same distinguishing logic readArticle
+    // uses for the two <time> elements (a quoted tweet's <time> sits inside
+    // a div[role="link"], not the anchor tweet's own a[role="link"]). Read
+    // regardless of same-author-ness, below, so a genuine self-quote-repost
+    // can still be checked against hasReplied() even though its text/handle
+    // are suppressed.
+    const id = await article.evaluate((el: any) => {
+      const times: any[] = Array.from(el.querySelectorAll("time"));
+      for (const t of times) {
+        let node: any = t.parentElement;
+        while (node && node !== el) {
+          if (node.getAttribute("role") === "link" && node.tagName === "DIV") {
+            const anchor = node.querySelector('a[href*="/status/"]');
+            const href = anchor?.getAttribute("href") || "";
+            const match = href.match(/status\/(\d+)/);
+            if (match) return match[1];
+          }
+          node = node.parentElement;
+        }
+      }
+      return null;
+    });
+
+    // Same author as the anchor — a "show this thread" preview, not a real
+    // quote worth surfacing as text (the forward continuation-walk already
+    // covers that content) — but the id is still returned so a deliberate
+    // self-quote-repost of already-replied content can still be caught.
+    if (quoteHandle && quoteHandle === rootHandle) {
+      return id ? { id } : undefined;
+    }
+
     return {
       text: quoteHandle ? `${quoteHandle}: ${quoteText}` : quoteText,
-      handle: quoteHandle
+      handle: quoteHandle,
+      ...(id ? { id } : {})
     };
   } catch {
     return undefined;
@@ -361,8 +398,9 @@ export async function extractCurrentTweet(
     latestSegmentAt,
     replies,
     isRoot,
-    ...(quotedTweet ? { quotedTweet: quotedTweet.text } : {}),
+    ...(quotedTweet?.text ? { quotedTweet: quotedTweet.text } : {}),
     ...(quotedTweet?.handle ? { quotedTweetHandle: quotedTweet.handle } : {}),
+    ...(quotedTweet?.id ? { quotedTweetId: quotedTweet.id } : {}),
     ...(parentTweet ? { parentTweet } : {}),
     ...(parentTweetHandle ? { parentTweetHandle } : {}),
     ...(previousThreadPost ? { previousThreadPost } : {}),

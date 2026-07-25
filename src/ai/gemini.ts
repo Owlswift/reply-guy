@@ -117,6 +117,14 @@ export class GeminiClient {
       "help.google.com",
       "if this issue persists",
       "i'm having trouble",
+      // Usage/rate-limit messages — same failure mode as chatgpt.ts:
+      // confirmed live that this class of message can get posted as an
+      // actual reply if it isn't recognized as an error first.
+      "usage limit",
+      "rate limit",
+      "try again later",
+      "you've reached your limit",
+      "message limit",
     ];
 
     const lowerReply = reply.toLowerCase();

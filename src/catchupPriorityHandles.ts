@@ -6,8 +6,10 @@ import { ChatGPTClient } from "./ai/chatgpt";
 import { judgeReplies } from "./ai/judgeReply";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
-import { hasReplied, markReplied } from "./storage/repliedTweets";
+import { hasReplied, markReplied, getRepliedReason } from "./storage/repliedTweets";
 import { isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { findBlockedContentWord } from "./decision/blockedContentWords";
+import { isHeavyPidgin } from "./decision/pidginDetection";
 import { prepareReply, clickReply } from "./reply/reply";
 import { postManualReply, hasManualReply } from "./cli/postManualReply";
 import { promptReplyDecision } from "./cli/promptReplyDecision";
@@ -67,6 +69,15 @@ async function main() {
 
     for (const post of posts) {
       if (hasReplied(post.id)) {
+        // This was the one skip path in this whole loop with no log line —
+        // every other reason prints something, but this one just vanished
+        // silently. That's exactly why a thread's ROOT can seem to
+        // disappear with no trace: two segments both correctly redirect to
+        // it (logged), but if the root itself was already replied to
+        // earlier (by the main bot, or a previous catch-up run), it never
+        // even reaches the "Opening ..." line below — it's filtered out
+        // right here, before anything is printed.
+        log(`[Catchup] ${post.url} already handled (${getRepliedReason(post.id) ?? "reason not recorded"}) — skipping.`);
         totalSkippedAlreadyReplied++;
         continue;
       }
@@ -121,6 +132,29 @@ async function main() {
         continue;
       }
 
+      // Explicit sexual content and heavy Nigerian Pidgin — same content
+      // gates main-interactive.ts enforces. checked across the full text
+      // plus any quoted/parent tweet, since a Pidgin-heavy QUOTED tweet
+      // makes a reply just as out-of-context here as in the main bot.
+      const catchupBlockedWord = findBlockedContentWord(details.fullText || details.text);
+      if (catchupBlockedWord) {
+        log(`[Catchup] ${post.url} contains blocked word "${catchupBlockedWord}" — skipping.`);
+        markReplied(post.id, `contains blocked word "${catchupBlockedWord}"`);
+        totalSkippedOther++;
+        continue;
+      }
+      const catchupPidginContext = [
+        details.fullText || details.text,
+        details.quotedTweet,
+        details.parentTweet
+      ].filter(Boolean).join(" ");
+      if (isHeavyPidgin(catchupPidginContext)) {
+        log(`[Catchup] ${post.url} is heavy Nigerian Pidgin (tweet or its quoted/parent tweet) — skipping to avoid an out-of-context reply.`);
+        markReplied(post.id, "heavy Nigerian Pidgin (tweet or its quoted/parent tweet), skipping to avoid an out-of-context reply");
+        totalSkippedOther++;
+        continue;
+      }
+
       // Never prompt on a middle/last segment of a self-thread — same rule
       // main-interactive.ts enforces via its own thread-root redirect.
       // scanProfileWithinWindow() returns every original post in the time
@@ -132,6 +166,30 @@ async function main() {
       if (!details.isRoot && details.rootId && details.rootUrl) {
         log(`[Catchup] ${post.url} is a segment of a thread rooted at ${details.rootId} — not prompting, root handles this instead.`);
         markReplied(post.id, `segment of a thread, root is ${details.rootUrl}`);
+        totalSkippedOther++;
+        continue;
+      }
+
+      // Reply to someone else's tweet, not an original post — same blanket
+      // rule main-interactive.ts enforces. By this point the self-thread
+      // case above is already handled, so a remaining parentTweet means the
+      // immediate predecessor article is a DIFFERENT author.
+      if (details.parentTweet) {
+        log(`[Catchup] ${post.url} is a reply to another tweet (${details.parentTweetHandle || "unknown handle"}), not an original post — skipping.`);
+        markReplied(post.id, `is a reply to another tweet (${details.parentTweetHandle || "unknown handle"}), not an original post`);
+        totalSkippedOther++;
+        continue;
+      }
+
+      // Quotes/reposts a tweet already replied to — either someone else
+      // quote-tweeting it, or (as caught live: @jas_d_barbie's "Huh" quoting
+      // their own earlier "Oh well" post) the author reposting their own
+      // already-answered content. A plain repost keeps the same underlying
+      // id (caught by hasReplied(post.id) above); a quote-tweet is a
+      // genuinely new id with no other link back to the original.
+      if (details.quotedTweetId && hasReplied(details.quotedTweetId)) {
+        log(`[Catchup] ${post.url} quotes/reposts a tweet already replied to (${details.quotedTweetId}) — skipping.`);
+        markReplied(post.id, `quotes/reposts a tweet already replied to (${details.quotedTweetId})`);
         totalSkippedOther++;
         continue;
       }

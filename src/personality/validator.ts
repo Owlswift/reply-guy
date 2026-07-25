@@ -33,7 +33,16 @@ export function validateReply(reply: string): boolean {
     "if this issue persists",
     // ChatGPT's mid-stream failure bubble — see src/ai/chatgpt.ts for why
     // this needs to be here too (same check, second line of defense).
-    "error in message stream"
+    "error in message stream",
+    // Usage/rate-limit messages from any provider (ChatGPT/Gemini/DeepSeek)
+    // — same second-line-of-defense reasoning: confirmed live that
+    // "You've hit your usage limit. Please try again later" got posted as
+    // an actual reply to a tweet.
+    "usage limit",
+    "rate limit",
+    "try again later",
+    "you've reached your limit",
+    "message limit"
   ];
 
   const lowerReply = trimmed.toLowerCase();

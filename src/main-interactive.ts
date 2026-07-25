@@ -13,6 +13,8 @@ import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTop
 import { flagPostForReview } from "./storage/flaggedPosts";
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
+import { findBlockedContentWord } from "./decision/blockedContentWords";
+import { isHeavyPidgin } from "./decision/pidginDetection";
 import { recordReplyForHour, getCurrentHourReplyCount } from "./storage/hourlyReplyStats";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
@@ -508,6 +510,28 @@ async function main() {
           continue;
         }
 
+        // Explicit sexual content (decision/blockedContentWords.ts) — never
+        // engage with these regardless of author/priority.
+        const blockedWord = findBlockedContentWord(tweet.text);
+        if (blockedWord) {
+          const wordReason = `contains blocked word "${blockedWord}"`;
+          logTweetOutcome("SKIP", tweet.url, wordReason, tweet.author);
+          markReplied(tweet.id, wordReason);
+          continue;
+        }
+
+        // Heavy Nigerian Pidgin (decision/pidginDetection.ts) — ChatGPT
+        // reliably misreads it and drafts a tonally/contextually wrong
+        // reply. This only catches it when the ANCHOR tweet's own text is
+        // heavily Pidgin; the more common case (a Pidgin-heavy QUOTED
+        // tweet the anchor is commenting on) isn't visible until the tweet
+        // is actually opened — see the PHASE 3 check after extractCurrentTweet.
+        if (isHeavyPidgin(tweet.text)) {
+          logTweetOutcome("SKIP", tweet.url, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply", tweet.author);
+          markReplied(tweet.id, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply");
+          continue;
+        }
+
         // Any reply — to themselves (a thread continuation) or to someone
         // else entirely — is skipped outright. Only original, standalone
         // posts are eligible. Broader than the old self-reply-only check
@@ -819,6 +843,45 @@ async function main() {
             continue;
           }
 
+          // Safety net for the enqueue-time content check above — the
+          // timeline preview can be truncated, so a blocked word only
+          // present once "Show more" is expanded wouldn't have been caught
+          // yet. fullText is the expanded version.
+          const openBlockedWord = findBlockedContentWord(details.fullText || details.text);
+          if (openBlockedWord) {
+            const openWordReason = `contains blocked word "${openBlockedWord}"`;
+            logTweetOutcome("SKIP", item.url, openWordReason, details.handle || item.author);
+            markReplied(item.id, openWordReason);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Heavy Nigerian Pidgin, checked across the anchor tweet AND its
+          // quoted/parent tweet — the enqueue-time check only ever sees the
+          // anchor's own (often plain-English) text, so a reply that's only
+          // making sense of a Pidgin-heavy QUOTED tweet slips past it. This
+          // is the actual case that prompted the check: the anchor tweet
+          // itself was simple English ("naija dating: invest now, watch the
+          // next guy enjoy later"), but the tweet it quoted was dense Pidgin
+          // ("...na 419 wey get iphone...you be the mumu wey fund the
+          // upgrade"), and ChatGPT's reply made no sense in that context.
+          const contextForPidginCheck = [
+            details.fullText || details.text,
+            details.quotedTweet,
+            details.parentTweet
+          ].filter(Boolean).join(" ");
+          if (isHeavyPidgin(contextForPidginCheck)) {
+            const pidginReason = "heavy Nigerian Pidgin (tweet or its quoted/parent tweet), skipping to avoid an out-of-context reply";
+            logTweetOutcome("SKIP", item.url, pidginReason, details.handle || item.author);
+            markReplied(item.id, pidginReason);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
           // Never reply to a middle/last segment of a self-thread — always
           // redirect to the root (extractTweet.ts's backward-walk found it).
           // Replying to whichever segment happened to trigger the
@@ -857,14 +920,55 @@ async function main() {
             continue;
           }
 
+          // Safety net for PHASE 1's tweet.isReply check — that one depends
+          // on X reliably rendering the "Replying to" banner on the
+          // notification-feed CARD, which it evidently doesn't always do
+          // (confirmed live: a reply to someone else's post reached here
+          // with tweet.isReply apparently false, and got its own AI reply
+          // instead of being skipped). details.parentTweet is read from the
+          // actual open page instead and is reliable — by this point the
+          // self-thread-segment case above has already been handled, so a
+          // remaining parentTweet means this tweet's immediate predecessor
+          // is a DIFFERENT author: it's itself a reply to someone else, not
+          // an original post. Same "only original, standalone posts are
+          // eligible" rule as PHASE 1, no priority-handle exception, since
+          // replying to a stranger's comment on someone else's post is the
+          // exact out-of-context bot-tell that rule exists to prevent.
+          if (details.parentTweet) {
+            const replyToOtherReason = `is a reply to another tweet (${details.parentTweetHandle || "unknown handle"}), not an original post — PHASE 1's isReply check missed this`;
+            logTweetOutcome("SKIP", item.url, replyToOtherReason, details.handle || item.author);
+            markReplied(item.id, replyToOtherReason);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Same idea, but for a quote/repost of a tweet already replied to
+          // — either someone else quote-tweeting it, or the original author
+          // reposting/quote-tweeting their own already-answered post. A
+          // PLAIN repost keeps the same underlying tweet id (already caught
+          // by hasReplied(item.id) above), but a quote-tweet is a genuinely
+          // new tweet id with no other link back to the original — without
+          // this, it reads as a brand-new post and gets its own fresh reply.
+          if (details.quotedTweetId && hasReplied(details.quotedTweetId)) {
+            const repostReason = `quotes/reposts a tweet already replied to (${details.quotedTweetId})`;
+            logTweetOutcome("SKIP", item.url, repostReason, details.handle || item.author);
+            markReplied(item.id, repostReason);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
           // Log surrounding context as it's found — no way to verify the
           // quote-card/parent/thread DOM detection (extractTweet.ts) is
           // actually firing correctly on real tweets without seeing it.
+          // details.parentTweet isn't logged here — by this point it's
+          // always undefined, since the check above already skips (and
+          // continues past this point) whenever it's set.
           if (details.quotedTweet) {
             log(`Tweet ${item.id} quotes: "${details.quotedTweet}"`);
-          }
-          if (details.parentTweet) {
-            log(`Tweet ${item.id} is a reply to: "${details.parentTweet}"`);
           }
           if (details.previousThreadPost) {
             log(`Tweet ${item.id} continues previous post: "${details.previousThreadPost}"`);
@@ -1139,14 +1243,14 @@ async function main() {
             // Use ChatGPT for other tweet types. Format-valid and non-duplicate
             // isn't enough on its own — judge whether the draft is actually
             // worth posting (adds insight, humor, etc., not just "I agree").
-            // Regenerate within the same attempt budget if it isn't, and
-            // fall back to the best-scoring attempt if none clear the bar,
-            // rather than throwing away a slow ChatGPT round-trip entirely.
-            // Capped at 2 attempts (was 3) — each attempt is a full ChatGPT
-            // browser round-trip plus a separate local-model judgeReplies
-            // call (and usually a separate analyzeTweet call before it), so
-            // a third attempt was one of the largest and most variable
-            // contributors to multi-minute reply times.
+            // Regenerate within the same attempt budget if it isn't, and fall
+            // back to the best-scoring attempt if none clear the bar, rather
+            // than throwing away a slow ChatGPT round-trip entirely. Capped
+            // at 2 attempts (was 3) — each attempt is a full ChatGPT browser
+            // round-trip plus a separate local-model judgeReplies call (and
+            // usually a separate analyzeTweet call before it), so a third
+            // attempt was one of the largest and most variable contributors
+            // to multi-minute reply times.
             let bestReply = "";
             let bestScore = -1;
 
@@ -1457,6 +1561,18 @@ async function main() {
               const existing2 = getQueue().find((q: QueueItem) => q.id === ft.id);
               if (existing2) {
                 logTweetOutcome("SKIP", ft.url, "already in queue", ft.author);
+                continue;
+              }
+              const ftBlockedWord = findBlockedContentWord(ft.text);
+              if (ftBlockedWord) {
+                const ftWordReason = `contains blocked word "${ftBlockedWord}"`;
+                logTweetOutcome("SKIP", ft.url, ftWordReason, ft.author);
+                markReplied(ft.id, ftWordReason);
+                continue;
+              }
+              if (isHeavyPidgin(ft.text)) {
+                logTweetOutcome("SKIP", ft.url, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply", ft.author);
+                markReplied(ft.id, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply");
                 continue;
               }
               const ftAgeMs = Date.now() - ft.createdAt.getTime();

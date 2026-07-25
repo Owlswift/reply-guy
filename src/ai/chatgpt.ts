@@ -111,7 +111,16 @@ export class ChatGPTClient {
       // button label with no space between them). Without this pattern it
       // passes every other check (>10 chars, no HTML, no other keyword
       // match) and gets treated as a real reply and posted as-is.
-      "error in message stream"
+      "error in message stream",
+      // Usage/rate-limit messages — confirmed live: "You've hit your usage
+      // limit. Please try again later" got posted as an actual reply to a
+      // tweet because nothing here recognized it as an error rather than a
+      // real (if oddly-worded) draft.
+      "usage limit",
+      "rate limit",
+      "try again later",
+      "you've reached your limit",
+      "message limit"
     ];
 
     const lowerReply = reply.toLowerCase();
