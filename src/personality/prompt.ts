@@ -6,6 +6,26 @@ import { TweetCategory } from "../types/analysis";
 import { TweetAnalysis, TweetContext } from "../ai/analyzeTweet";
 import { ReplyMemory } from "../types/memory";
 
+// ─── Per-reply line-count ceiling — random range, configurable via env ──────
+// Reflective mode and politics get a wider range since they're the two
+// cases that legitimately sometimes need more room (a developed thought, a
+// heavier topic) — everything else stays tighter by default. Env-overridable
+// so these can be tuned without a code change/redeploy.
+function parseEnvInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const LINE_TARGET_REFLECTIVE_POLITICS_MIN = parseEnvInt("REPLY_LINE_MIN_REFLECTIVE_POLITICS", 1);
+const LINE_TARGET_REFLECTIVE_POLITICS_MAX = parseEnvInt("REPLY_LINE_MAX_REFLECTIVE_POLITICS", 3);
+const LINE_TARGET_DEFAULT_MIN = parseEnvInt("REPLY_LINE_MIN_DEFAULT", 1);
+const LINE_TARGET_DEFAULT_MAX = parseEnvInt("REPLY_LINE_MAX_DEFAULT", 2);
+
+function randomInRange(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // ─── Surrounding context block — quote-tweet/reply/thread awareness ─────────
 // Without this, a tweet gets analyzed and replied to in complete isolation
 // even when its actual meaning depends entirely on what it's quoting or
@@ -265,7 +285,10 @@ ${buildQuickReactionGuidance()}
 const BANNED_OPENERS = `
 CRITICAL RULES - NEVER VIOLATE THESE:
 
-- NEVER restate or summarize the tweet in different words, even dressed up as an "insight." If the reader could say "that's just what the tweet already said," it's a recap, not a reply — this is the single most common way these replies fail.
+- NEVER restate or summarize the tweet in different words, even dressed up as an "insight." If the reader could say "that's just what the tweet already said," it's a recap, not a reply — this is the single most common way these replies fail. This trap is easiest to fall into on a "parallel contrast" tweet — one that lists two or three things against each other to make its point (X takes years, Y takes seconds; one thing is earned, the other isn't). Translating that same contrast into your own words FEELS like insight because you rephrased it, but it's still just a recap. Example of the failure:
+  Tweet: "Consistency fit reach 10yrs / Connection na 1 week / Grace na 2 seconds" (the contrast: trust built over years, destroyed in seconds)
+  Bad reply: "crazy how people spend years building trust then expect it to survive one bad moment with zero patience lol" — this is the exact same contrast, just spelled out in different words, plus a "lol" that doesn't even fit the tweet's reflective tone.
+  Good reply: "Yea bro, we pray for grace while we keep being consistent" — reacts personally instead of re-explaining the contrast, matches the tone, doesn't restate it.
 - NEVER start with "One thing I'd add," "One thing to add," "If that's really what happened," "If that's true," "If this happened," or "If that happened" — just state your point directly.
 - NEVER start with "The real lesson," "The real test," "The real ___ is," or any "The real X" framing.
 - NEVER write "X wasn't really about Y, it was about Z," "X isn't about Y, it's Z," "That wasn't about [X]," or "This just proves [X]" — these are all the same cliché reframe/summary trick in different words. If your reply's structure is "[thing] wasn't about [surface reason], it was [real reason]," rewrite it.
@@ -1255,6 +1278,20 @@ export function buildPersonalityPrompt(
   // politics prompt above). Every other category should default to the
   // smallest, plainest words available, not just "no corporate jargon."
   const isPolitics = normalized === "politics";
+
+  // A random, per-reply line-count ceiling — picked fresh for every single
+  // tweet, before this prompt is even built. The old "2-4 lines" language
+  // left the choice up to the model every time, and it kept clustering at
+  // the top of that range (3-4 lines) reply after reply instead of
+  // actually varying. Pre-rolling a specific number and stating it as
+  // THIS reply's target (not a re-usable rule) is what actually forces
+  // the variation. Reflective mode and politics get the wider range
+  // (env-configurable, default 1-3) since those are the two legitimate
+  // cases for more room; everything else stays tighter (default 1-2).
+  const lineTarget = (mode === "reflective" || isPolitics)
+    ? randomInRange(LINE_TARGET_REFLECTIVE_POLITICS_MIN, LINE_TARGET_REFLECTIVE_POLITICS_MAX)
+    : randomInRange(LINE_TARGET_DEFAULT_MIN, LINE_TARGET_DEFAULT_MAX);
+
   const vocabularyRule = isPolitics
     ? `• Political posts are the one exception to "keep it casual" — if the topic is genuinely heavy (policy, tragedy, a serious debate), it's fine to sound a bit more composed and use slightly bigger words than usual. For a lighter political post, default back to the same plain, short words as every other category — don't reach for formal phrasing just because the topic is politics.`
     : `• Use short, plain, everyday words — the kind you'd actually say out loud, not the more "correct" or impressive-sounding synonym. If a word has a simpler everyday version, use the simpler one. Nothing that reads formal, academic, or written — this should sound like someone typing fast on their phone, not composing a sentence.`;
@@ -1296,8 +1333,11 @@ ${shorthandRule}
 • Do NOT add an emoji just to soften, lighten, or punctuate a reply — especially not on a reflective, vulnerable, or emotionally honest tweet, where it undercuts the point instead of adding to it. Only use one if the tweet's own tone genuinely calls for it (it's already playful, already using emoji, etc.) — never as a default habit.
 • Be plain and direct. If you wouldn't say it to a friend, don't write it.
 ${mode === "reflective"
-  ? `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`
-  : `• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`}`;
+  ? (lineTarget === 1
+      ? `• This reply is in REFLECTIVE MODE, but THIS specific reply's ceiling (below) is only 1 line — compress the reflective angle into ONE sharp, complete thought instead of forcing two separate ones. A single well-observed line beats two thin ones stretched out to hit a minimum.`
+      : `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`)
+  : `• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`}
+• Length ceiling for THIS specific reply: ${lineTarget} line${lineTarget === 1 ? "" : "s"} at most. This is a ceiling, not a target to fill — only use up to that many lines if the tweet actually has that much real content to react to. A simple post, greeting, meme, or one-beat joke still gets just ONE short line regardless of this number, and nothing here overrides a shorter rule stated earlier in this prompt (well-wishes, greetings, memes, and quick reactions all stay as short as their own instructions already say). Never pad a short reaction out just to use up this ceiling — going under it is always fine, going over it isn't.`;
 
   return contextBlock + basePrompt + modeBlock + finalGuardrail;
 }

@@ -66,3 +66,27 @@ export function markReplied(id: string, reason: string = "reason not recorded (c
   ids.set(id, reason);
   save();
 }
+
+// Reasons that reflect a one-off, transient failure — the AI/operator
+// couldn't produce something worth posting THAT one time, not a deliberate
+// "never reply to this" decision. Recording these as if they were a real
+// skip decision permanently blocked a tweet from ever being retried, even
+// though the actual cause was often just an AI hiccup, or the operator
+// being away from the keyboard for the 20s prompt window. Structured as a
+// list (not a single string) so more transient-failure reasons can be
+// added later without touching every call site that checks this.
+const RETRYABLE_REASONS: string[] = [
+  "operator chose to skip after AI generation failed to produce a valid reply"
+];
+
+/**
+ * Whether a previously-recorded "done" status should still block retrying.
+ * True for every real decision (blocked handle, already posted, thread
+ * dedup, etc.); false for RETRYABLE_REASONS, so a later run gets a fresh
+ * shot at the AI instead of being blocked forever by one failed attempt.
+ */
+export function isPermanentlySkipped(id: string): boolean {
+  if (!hasReplied(id)) return false;
+  const reason = getRepliedReason(id);
+  return reason === undefined || !RETRYABLE_REASONS.includes(reason);
+}

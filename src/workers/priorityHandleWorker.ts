@@ -1,7 +1,7 @@
 import { Page } from "playwright";
 import { visitProfileForNewOriginals } from "../browser/visitProfile";
 import { ensureTracked, getDueHandles, recordCheck } from "../storage/priorityHandles";
-import { hasReplied } from "../storage/repliedTweets";
+import { isPermanentlySkipped } from "../storage/repliedTweets";
 import { enqueue, getQueue, QueueItem } from "../core/queue";
 import { log } from "../utils/logger";
 
@@ -52,7 +52,7 @@ export async function runPriorityHandleWorker(page: Page, handles: string[]): Pr
 
       let enqueuedCount = 0;
       for (const tweet of newOriginals) {
-        if (hasReplied(tweet.id)) continue;
+        if (isPermanentlySkipped(tweet.id)) continue;
         if (getQueue().find((q: QueueItem) => q.id === tweet.id)) continue;
 
         enqueue({

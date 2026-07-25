@@ -6,7 +6,7 @@ import { ChatGPTClient } from "./ai/chatgpt";
 import { judgeReplies } from "./ai/judgeReply";
 import { validateReply } from "./personality/validator";
 import { isDuplicate } from "./personality/duplicate";
-import { hasReplied, markReplied, getRepliedReason } from "./storage/repliedTweets";
+import { markReplied, getRepliedReason, isPermanentlySkipped } from "./storage/repliedTweets";
 import { isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { findBlockedContentWord } from "./decision/blockedContentWords";
 import { isHeavyPidgin } from "./decision/pidginDetection";
@@ -68,7 +68,13 @@ async function main() {
     log(`[Catchup] @${cleanHandle}: ${posts.length} original post(s) in window.`);
 
     for (const post of posts) {
-      if (hasReplied(post.id)) {
+      // isPermanentlySkipped (not hasReplied) — a post marked done only
+      // because the AI failed to draft anything worth posting that one
+      // time (and the operator skipped it in the moment, often just
+      // because they weren't at the keyboard for the 20s prompt) isn't a
+      // real "never reply to this" decision. Retry it instead of treating
+      // one bad ChatGPT attempt as a permanent block.
+      if (isPermanentlySkipped(post.id)) {
         // This was the one skip path in this whole loop with no log line —
         // every other reason prints something, but this one just vanished
         // silently. That's exactly why a thread's ROOT can seem to
@@ -187,7 +193,7 @@ async function main() {
       // already-answered content. A plain repost keeps the same underlying
       // id (caught by hasReplied(post.id) above); a quote-tweet is a
       // genuinely new id with no other link back to the original.
-      if (details.quotedTweetId && hasReplied(details.quotedTweetId)) {
+      if (details.quotedTweetId && isPermanentlySkipped(details.quotedTweetId)) {
         log(`[Catchup] ${post.url} quotes/reposts a tweet already replied to (${details.quotedTweetId}) — skipping.`);
         markReplied(post.id, `quotes/reposts a tweet already replied to (${details.quotedTweetId})`);
         totalSkippedOther++;

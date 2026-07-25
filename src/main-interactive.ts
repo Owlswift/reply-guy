@@ -7,7 +7,7 @@ import { enqueue, queueSize, getQueue, QueueItem, peek, dequeue, updateItem, reR
 import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
-import { hasReplied, getRepliedReason } from "./storage/repliedTweets";
+import { getRepliedReason, isPermanentlySkipped } from "./storage/repliedTweets";
 import { hasUrlBeenReplied, markUrlReplied } from "./storage/repliedUrls";
 import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { flagPostForReview } from "./storage/flaggedPosts";
@@ -452,7 +452,7 @@ async function main() {
 
       // Check if ALL visible tweets have already been replied to.
       // If so, scroll down to find older notifications that haven't been replied.
-      const allAlreadyReplied = tweets.every(t => hasReplied(t.id));
+      const allAlreadyReplied = tweets.every(t => isPermanentlySkipped(t.id));
       if (allAlreadyReplied) {
         // Per-post visibility even on this fast path — this used to be a
         // single generic message covering the whole batch, which made it
@@ -489,8 +489,11 @@ async function main() {
       const replyRatio = getReplyRatio();
       logTableHeader();
       for (const tweet of tweets) {
-        // Skip if already replied
-        if (hasReplied(tweet.id)) {
+        // Skip if already replied — isPermanentlySkipped, not hasReplied,
+        // since a tweet only marked done because the AI failed to draft
+        // anything worth posting isn't a real "never reply to this"
+        // decision and deserves a fresh attempt, not a permanent block.
+        if (isPermanentlySkipped(tweet.id)) {
           logTweetOutcome("SKIP", tweet.url, getRepliedReason(tweet.id) ?? "already handled, reason not recorded", tweet.author);
           continue;
         }
@@ -695,7 +698,7 @@ async function main() {
             );
 
             const id = url.match(/status\/(\d+)/)?.[1];
-            if (!id || hasReplied(id)) {
+            if (!id || isPermanentlySkipped(id)) {
               continue;
             }
             const author = url.match(/x\.com\/([^/]+)\/status/)?.[1];
@@ -894,7 +897,7 @@ async function main() {
             markReplied(item.id, `segment of a thread, redirected to root ${details.rootUrl}`);
             markNotificationReplied(item.id);
 
-            if (hasReplied(details.rootId)) {
+            if (isPermanentlySkipped(details.rootId)) {
               logTweetOutcome("SKIP", item.url, "segment of an already-processed thread, no navigation needed beyond this", details.handle || item.author, details.rootUrl);
               await navigator.returnToTimeline();
               dequeue();
@@ -951,7 +954,7 @@ async function main() {
           // by hasReplied(item.id) above), but a quote-tweet is a genuinely
           // new tweet id with no other link back to the original — without
           // this, it reads as a brand-new post and gets its own fresh reply.
-          if (details.quotedTweetId && hasReplied(details.quotedTweetId)) {
+          if (details.quotedTweetId && isPermanentlySkipped(details.quotedTweetId)) {
             const repostReason = `quotes/reposts a tweet already replied to (${details.quotedTweetId})`;
             logTweetOutcome("SKIP", item.url, repostReason, details.handle || item.author);
             markReplied(item.id, repostReason);
@@ -1554,7 +1557,7 @@ async function main() {
             const replyRatio2 = getReplyRatio();
             logTableHeader();
             for (const ft of freshTweets) {
-              if (hasReplied(ft.id)) {
+              if (isPermanentlySkipped(ft.id)) {
                 logTweetOutcome("SKIP", ft.url, getRepliedReason(ft.id) ?? "already handled, reason not recorded", ft.author);
                 continue;
               }
