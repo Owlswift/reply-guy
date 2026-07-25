@@ -1,3 +1,5 @@
+import { isLikelyAiErrorMessage } from "../ai/errorDetection";
+
 export function validateReply(reply: string): boolean {
   const trimmed = reply.trim();
 
@@ -19,34 +21,12 @@ export function validateReply(reply: string): boolean {
     return false;
   }
 
-  // Reject common error messages
-  const errorPatterns = [
-    "enable javascript",
-    "enable cookies",
-    "challenge-error",
-    "verify you are human",
-    "cloudflare",
-    "access denied",
-    "error occurred",
-    "something went wrong while generating the response",
-    "help.openai.com",
-    "if this issue persists",
-    // ChatGPT's mid-stream failure bubble — see src/ai/chatgpt.ts for why
-    // this needs to be here too (same check, second line of defense).
-    "error in message stream",
-    // Usage/rate-limit messages from any provider (ChatGPT/Gemini/DeepSeek)
-    // — same second-line-of-defense reasoning: confirmed live that
-    // "You've hit your usage limit. Please try again later" got posted as
-    // an actual reply to a tweet.
-    "usage limit",
-    "rate limit",
-    "try again later",
-    "you've reached your limit",
-    "message limit"
-  ];
-
-  const lowerReply = trimmed.toLowerCase();
-  if (errorPatterns.some(pattern => lowerReply.includes(pattern))) {
+  // Reject common error messages — shared list across every provider
+  // (src/ai/errorDetection.ts), same list the provider clients themselves
+  // check. This is the second line of defense: a provider-specific error
+  // phrase discovered later only needs to be added there once to cover
+  // both checks, instead of drifting out of sync between two copies.
+  if (isLikelyAiErrorMessage(trimmed)) {
     return false;
   }
 
@@ -89,7 +69,7 @@ export function validateReply(reply: string): boolean {
     "if that's true",
   ];
 
-  const lowerReplyFirst100 = lowerReply.substring(0, 100);
+  const lowerReplyFirst100 = trimmed.toLowerCase().substring(0, 100);
   if (prohibitedAnywhere.some(phrase => lowerReplyFirst100.includes(phrase))) {
     return false;
   }

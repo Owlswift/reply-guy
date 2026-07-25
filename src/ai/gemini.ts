@@ -2,6 +2,7 @@ import { Page } from "playwright";
 import { getBrowserAndContext } from "../browser/browser";
 import { buildPrompt, PromptInput } from "./buildPrompt";
 import { log } from "../utils/logger";
+import { isLikelyAiErrorMessage } from "./errorDetection";
 
 /**
  * GeminiClient - Automates gemini.google.com via Playwright, mirroring
@@ -103,34 +104,10 @@ export class GeminiClient {
       throw new Error("Gemini returned empty or too short response");
     }
 
-    // Check for common error indicators — same categories as chatgpt.ts's
-    // check (a stalled/failed generation, a login/consent wall, etc.)
-    const errorPatterns = [
-      "enable javascript",
-      "enable cookies",
-      "challenge-error",
-      "verify you are human",
-      "cloudflare",
-      "access denied",
-      "error occurred",
-      "something went wrong",
-      "help.google.com",
-      "if this issue persists",
-      "i'm having trouble",
-      // Usage/rate-limit messages — same failure mode as chatgpt.ts:
-      // confirmed live that this class of message can get posted as an
-      // actual reply if it isn't recognized as an error first.
-      "usage limit",
-      "rate limit",
-      "try again later",
-      "you've reached your limit",
-      "message limit",
-    ];
-
-    const lowerReply = reply.toLowerCase();
-    const hasError = errorPatterns.some(pattern => lowerReply.includes(pattern));
-
-    if (hasError) {
+    // Check for common error indicators — shared list across every
+    // provider (src/ai/errorDetection.ts), not a separately-maintained
+    // copy per file.
+    if (isLikelyAiErrorMessage(reply)) {
       throw new Error(`Gemini returned error page: ${reply.substring(0, 100)}`);
     }
 

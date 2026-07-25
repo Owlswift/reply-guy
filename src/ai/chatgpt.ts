@@ -2,6 +2,7 @@ import { Page } from "playwright";
 import { getBrowserAndContext } from "../browser/browser";
 import { buildPrompt, PromptInput } from "./buildPrompt";
 import { log } from "../utils/logger";
+import { isLikelyAiErrorMessage } from "./errorDetection";
 
 /**
  * ChatGPTClient - Automates chat.openai.com via Playwright
@@ -94,39 +95,10 @@ export class ChatGPTClient {
       throw new Error("ChatGPT returned empty or too short response");
     }
 
-    // Check for common error indicators
-    const errorPatterns = [
-      "enable javascript",
-      "enable cookies",
-      "challenge-error",
-      "verify you are human",
-      "cloudflare",
-      "access denied",
-      "error occurred",
-      "something went wrong while generating the response",
-      "help.openai.com",
-      "if this issue persists",
-      // ChatGPT's mid-stream failure bubble — scraped via textContent this
-      // reads as "Error in message streamRetry" (the message and the Retry
-      // button label with no space between them). Without this pattern it
-      // passes every other check (>10 chars, no HTML, no other keyword
-      // match) and gets treated as a real reply and posted as-is.
-      "error in message stream",
-      // Usage/rate-limit messages — confirmed live: "You've hit your usage
-      // limit. Please try again later" got posted as an actual reply to a
-      // tweet because nothing here recognized it as an error rather than a
-      // real (if oddly-worded) draft.
-      "usage limit",
-      "rate limit",
-      "try again later",
-      "you've reached your limit",
-      "message limit"
-    ];
-
-    const lowerReply = reply.toLowerCase();
-    const hasError = errorPatterns.some(pattern => lowerReply.includes(pattern));
-
-    if (hasError) {
+    // Check for common error indicators — shared list across every
+    // provider (src/ai/errorDetection.ts), not a separately-maintained
+    // copy per file.
+    if (isLikelyAiErrorMessage(reply)) {
       throw new Error(`ChatGPT returned error page: ${reply.substring(0, 100)}`);
     }
 
