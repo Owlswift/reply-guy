@@ -3,6 +3,7 @@ import { getBrowserAndContext } from "../browser/browser";
 import { buildPrompt, PromptInput } from "./buildPrompt";
 import { log } from "../utils/logger";
 import { isLikelyAiErrorMessage } from "./errorDetection";
+import { parseStructuredReply } from "./parseStructuredReply";
 
 /**
  * ChatGPTClient - Automates chat.openai.com via Playwright
@@ -107,7 +108,19 @@ export class ChatGPTClient {
       throw new Error(`ChatGPT returned HTML content instead of text: ${reply.substring(0, 100)}`);
     }
 
-    return reply;
+    // The prompt asks for "UNDERSTANDING: ...\nREPLY: ..." (prompt.ts's
+    // Stage 1/Stage 2 structure) so the model's own read on the tweet is
+    // visible for a human to assess, not just its final output. Log it
+    // and return only the reply text — the understanding is never itself
+    // part of what gets posted.
+    const { understanding, reply: replyText } = parseStructuredReply(reply);
+    if (understanding) {
+      log(`[ChatGPT] Understanding: ${understanding}`);
+    } else {
+      log(`[ChatGPT] No structured understanding found in response — model didn't follow the output format this time.`);
+    }
+
+    return replyText;
   }
 
   /**
