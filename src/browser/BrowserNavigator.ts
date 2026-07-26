@@ -49,19 +49,22 @@ export class BrowserNavigator {
       const count = await card.count();
 
       if (count === 0) {
-        // No notification card — check if we're already on the i/timeline page
+        // No notification card to click — the ONLY way this counts as
+        // "opened" is if we're already sitting on /i/timeline for some
+        // other reason. This used to unconditionally return true either
+        // way (a dead if/else — both branches returned the same value),
+        // which let checking-for-tweets proceed even with no card ever
+        // clicked and no confirmed /i/timeline landing.
         const currentUrl = this.page.url();
-        if (currentUrl.includes("/i/timeline")) {
-          return true;
-        }
-        return true;
+        return currentUrl.includes("/i/timeline");
       }
 
       try {
         await card.first().waitFor({ timeout: 5000 });
         await card.first().click();
       } catch {
-        return true;
+        // Click never happened — not a valid "opened" outcome.
+        return false;
       }
 
       // Wait for articles to render after clicking the card
@@ -70,6 +73,20 @@ export class BrowserNavigator {
           timeout: 10000
         });
       } catch {
+        return false;
+      }
+
+      // The card doesn't always land on /i/timeline — confirmed live: when
+      // only one account has new posts, X deep-links straight to that
+      // account's own profile instead. Checking-for-tweets/scrolling must
+      // only ever start from a confirmed /i/timeline landing, so treat
+      // anything else as a failed attempt (the caller just retries from
+      // /notifications next cycle) rather than proceeding on the wrong
+      // page. A plain goto("/i/timeline") gets redirected server-side to
+      // /home and is never a valid fallback — do not reintroduce that here.
+      const landedUrl = this.page.url();
+      if (!landedUrl.includes("/i/timeline")) {
+        log(`[Navigator] "New post notifications" card landed on ${landedUrl} instead of /i/timeline — treating as not opened.`);
         return false;
       }
 

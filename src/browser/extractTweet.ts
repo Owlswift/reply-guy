@@ -239,6 +239,24 @@ export async function extractCurrentTweet(
     return null;
   }
 
+  // Which articles (by index, same order/count as `articles` above — this
+  // must run before any further DOM changes) sit at or after X's
+  // "Discover more" recommendations divider. Confirmed live: two totally
+  // unrelated threads by the same author recommended EACH OTHER in their
+  // own "Discover more" section — same author, well within TIME_WINDOW_MS
+  // of each other, so the forward-walk's only two checks (author, time
+  // window) both passed and it absorbed the other thread's content as if
+  // it were a real continuation. DOM order is stable regardless of scroll
+  // position, so this holds however far the page has been scrolled.
+  const afterDiscoverMore: boolean[] = await page.evaluate(() => {
+    const articleEls: any[] = Array.from((document as any).querySelectorAll("article"));
+    const candidates: any[] = Array.from((document as any).querySelectorAll("div, span, h2"));
+    const discoverEl = candidates.find((el: any) => (el.textContent ?? "").trim() === "Discover more");
+    if (!discoverEl) return articleEls.map(() => false);
+    const FOLLOWING = 4; // Node.DOCUMENT_POSITION_FOLLOWING
+    return articleEls.map((el: any) => !!(discoverEl.compareDocumentPosition(el) & FOLLOWING));
+  });
+
   // The anchor is whichever tweet the page opened to. Confirm it by matching
   // this article's own permalink status id against the URL's — X's permalink
   // pages render ancestor tweets in a reply chain ABOVE the target tweet, so
@@ -354,12 +372,12 @@ export async function extractCurrentTweet(
 
   // A thread is a strictly sequential run of the same author's tweets.
   // Walk forward from the anchor and stop PERMANENTLY at the first article
-  // that breaks that run — a different author, or one too far outside the
-  // time window. Do not resume matching afterward even if a later article
-  // happens to carry the same author's name again (X appends unrelated
-  // "Discover more" recommendations after the real thread ends, often by
-  // the same author on a completely different topic — those must never be
-  // pulled back in just because the handle matches).
+  // that breaks that run — a different author, one too far outside the
+  // time window, or afterDiscoverMore (X's recommendations section, which
+  // author/time-window checks alone do NOT reliably exclude — confirmed
+  // live: two totally unrelated threads by the same author recommended
+  // EACH OTHER, well within the time window, and got silently merged
+  // before this explicit boundary check existed).
   const seenTexts = new Set<string>();
   const threadTexts: string[] = [];
   let latestSegmentAt = anchor.time;
@@ -372,6 +390,7 @@ export async function extractCurrentTweet(
   record(anchor.text, anchor.time);
 
   for (let i = anchorIndex + 1; i < articles.length; i++) {
+    if (afterDiscoverMore[i]) break;
     const article = articles[i];
     if (!article) break;
     const parsed = await readArticle(article);

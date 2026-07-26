@@ -10,6 +10,7 @@ import { markReplied, getRepliedReason, isPermanentlySkipped } from "./storage/r
 import { isBlockedHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { findBlockedContentWord } from "./decision/blockedContentWords";
 import { isHeavyPidgin } from "./decision/pidginDetection";
+import { isQuoteBaitTweet } from "./decision/quoteBaitDetection";
 import { prepareReply, clickReply } from "./reply/reply";
 import { postManualReply, hasManualReply } from "./cli/postManualReply";
 import { promptReplyDecision } from "./cli/promptReplyDecision";
@@ -160,6 +161,12 @@ async function main() {
         totalSkippedOther++;
         continue;
       }
+      if (isQuoteBaitTweet(details.fullText || details.text)) {
+        log(`[Catchup] ${post.url} is quote-tweet engagement bait — skipping.`);
+        markReplied(post.id, "quote-tweet engagement bait");
+        totalSkippedOther++;
+        continue;
+      }
 
       // Never prompt on a middle/last segment of a self-thread — same rule
       // main-interactive.ts enforces via its own thread-root redirect.
@@ -273,13 +280,22 @@ async function main() {
         }
 
         const [judged] = await judgeReplies(tweetText, [reply]);
-        if (judged && judged.score > bestScore) {
+        // valid check is load-bearing here — an invalid reply (error
+        // message, refusal, etc.) always scores 0, which is still > the
+        // initial bestScore of -1, so without this it could win the
+        // best-effort fallback below and get posted anyway.
+        if (judged && judged.valid && judged.score > bestScore) {
           bestReply = reply;
           bestScore = judged.score;
         }
 
         if (judged?.worthPosting) {
           break;
+        }
+        if (judged && !judged.valid) {
+          log(`[Catchup] Attempt ${i + 1} was invalid (${judged.reason || "no reason"}) — regenerating.`);
+          reply = "";
+          continue;
         }
         log(`[Catchup] Attempt ${i + 1} not worth posting (${judged?.reason ?? "no reason"}) — regenerating.`);
         reply = "";

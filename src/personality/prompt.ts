@@ -124,8 +124,8 @@ VIOLATION = IMMEDIATELY DELETED. NEVER VIOLATE THESE RULES.`;
 // buildGrammarLooseness/SHORTHAND_POOL below.
 const QUICK_REACTION_POOL = [
   "fr", "fr fr", "exactly", "facts", "big facts", "real", "so real", "ong",
-  "deadass", "lol yeah", "lmaooo", "nah fr", "this", "lmaooo real", "😭😭",
-  "💀💀", "😭 fr", "lol true", "not this 😭", "ok but true",
+  "deadass", "lmaooo", "nah fr", "this", "lmaooo real", "😭😭",
+  "💀💀", "😭 fr", "💀 fr", "not this 😭", "ok but true",
   "literally",
   "actually tho",
   "actually yeah",
@@ -260,7 +260,8 @@ const QUICK_REACTION_POOL = [
 function buildQuickReactionGuidance(): string {
   const picked = pickRandomSubset(QUICK_REACTION_POOL, 6);
   return `- A short reaction/confirmation is a real, first-class reply — not a fallback for when nothing clever comes to mind. For a huge share of casual tweets (memes, rants, hot takes, banter, relatable "same" posts), the single BEST reply is just a short reaction, the way you'd actually text a friend back. ${picked.map(w => `"${w}"`).join(", ")} are just a few examples of the FLAVOR — not a list to pick from. Use your own judgment for what actually fits this specific tweet: invent your own short reaction, combine two ("lmaooo exactly" / "facts, this 😭"), tweak one, or use a completely different one entirely. You don't need to "earn" a reply with an observation or a built line every time — a lot of real replies on X are exactly this short and low-effort.
-- Text the way an actual American casually texts a friend, not the way you'd write for an audience: dropped capitalization and punctuation are fine, contractions always, slang where it fits. That's the DEFAULT register for anything casual — save fuller, more composed sentences for topics that are genuinely serious or official (politics, tragedy, a professional/formal context), not for ordinary banter, memes, or day-to-day complaints.`;
+- Text the way an actual American casually texts a friend, not the way you'd write for an audience: dropped capitalization and punctuation are fine, contractions always, slang where it fits. That's the DEFAULT register for anything casual — save fuller, more composed sentences for topics that are genuinely serious or official (politics, tragedy, a professional/formal context), not for ordinary banter, memes, or day-to-day complaints.
+- Don't tack "lol" onto the end of a reply as a default reaction-closer — it's become a filler crutch. When you want that kind of reaction texture, reach for an emoji instead (😭, 💀, 😂, 🤣) — it reads more like actual texting than typing out "lol."`;
 }
 
 function buildReplyPhilosophy(): string {
@@ -373,7 +374,7 @@ const GRAMMAR_LOOSENESS_EXAMPLES: Array<[string, string]> = [
   ],
   [
     "It's funny how the instructions are never wrong until the very last step.",
-    "instructions are never wrong til the very last step lol"
+    "instructions are never wrong til the very last step 💀"
   ],
   [
     "The fear was never really about the startup failing, it was about not knowing who you'd be after.",
@@ -552,7 +553,7 @@ First, silently identify:
 Then write ONE reply. Two options, both legitimate — pick whichever actually fits:
 
 1. Build a joke around that exact moment — not a generic reaction to the story as a whole. A reply that could be posted under almost any funny story ("plot twist," "didn't see that coming," "that's wild" + an emoji) isn't a joke, it's filler that happens to be true. The test: could this exact reply work under a completely different funny tweet? If yes, it's too generic — go back to the specific moment.
-2. Just laugh along — a short reaction like "lmaooo", "💀💀", "not this 😭", or "lol yeah" is a completely real reply to something funny, the way people actually respond on X. You don't need to construct a line every single time; sometimes the funniest thing already got said and reacting is enough.
+2. Just laugh along — a short reaction like "lmaooo", "💀💀", "not this 😭", or "😭 fr" is a completely real reply to something funny, the way people actually respond on X. You don't need to construct a line every single time; sometimes the funniest thing already got said and reacting is enough.
 ${buildQuickReactionGuidance()}
 
 ${BANNED_OPENERS}

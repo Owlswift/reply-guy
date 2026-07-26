@@ -14,7 +14,11 @@ export async function extractTweets(
     // (e.g. an opened tweet conversation page, or a logged-out/error page), this
     // is a normal control-flow condition for an autonomous bot — not an error.
     // Skip silently (return no tweets) instead of throwing, so the caller can
-    // just continue to the next cycle.
+    // just continue to the next cycle. BrowserNavigator.openNotificationFeed()
+    // now only ever reports success on a confirmed /i/timeline landing (a
+    // profile-page redirect is treated as a failed attempt there instead),
+    // so this should never actually see a bare profile URL from that path —
+    // kept simple/strict rather than also tolerating one here.
     const url = page.url();
     const onTimeline =
         url.includes("/i/timeline") ||

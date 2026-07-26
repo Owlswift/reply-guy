@@ -15,6 +15,7 @@ import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
 import { findBlockedContentWord } from "./decision/blockedContentWords";
 import { isHeavyPidgin } from "./decision/pidginDetection";
+import { isQuoteBaitTweet } from "./decision/quoteBaitDetection";
 import { recordReplyForHour, getCurrentHourReplyCount } from "./storage/hourlyReplyStats";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
@@ -535,6 +536,15 @@ async function main() {
           continue;
         }
 
+        // Quote-tweet engagement bait (decision/quoteBaitDetection.ts) —
+        // "Quote this tweet with...", "QT this with..." — replying adds
+        // nothing, the post exists purely to farm quote-tweets.
+        if (isQuoteBaitTweet(tweet.text)) {
+          logTweetOutcome("SKIP", tweet.url, "quote-tweet engagement bait", tweet.author);
+          markReplied(tweet.id, "quote-tweet engagement bait");
+          continue;
+        }
+
         // Any reply — to themselves (a thread continuation) or to someone
         // else entirely — is skipped outright. Only original, standalone
         // posts are eligible. Broader than the old self-reply-only check
@@ -879,6 +889,18 @@ async function main() {
             const pidginReason = "heavy Nigerian Pidgin (tweet or its quoted/parent tweet), skipping to avoid an out-of-context reply";
             logTweetOutcome("SKIP", item.url, pidginReason, details.handle || item.author);
             markReplied(item.id, pidginReason);
+            markNotificationReplied(item.id);
+            await navigator.returnToTimeline();
+            dequeue();
+            continue;
+          }
+
+          // Safety net for the enqueue-time quote-bait check above — the
+          // fully expanded text can reveal the CTA even when the truncated
+          // timeline preview didn't show it.
+          if (isQuoteBaitTweet(details.fullText || details.text)) {
+            logTweetOutcome("SKIP", item.url, "quote-tweet engagement bait", details.handle || item.author);
+            markReplied(item.id, "quote-tweet engagement bait");
             markNotificationReplied(item.id);
             await navigator.returnToTimeline();
             dequeue();
@@ -1281,13 +1303,23 @@ async function main() {
               }
 
               const [judged] = await judgeReplies(tweetText, [reply]);
-              if (judged && judged.score > bestScore) {
+              // valid check is load-bearing here, not just worthPosting's
+              // problem — an invalid reply (error message, refusal, etc.)
+              // always scores 0, which is still > the initial bestScore of
+              // -1, so without this an invalid reply could win the
+              // best-effort fallback below and get posted anyway.
+              if (judged && judged.valid && judged.score > bestScore) {
                 bestReply = reply;
                 bestScore = judged.score;
               }
 
               if (judged?.worthPosting) {
                 break;
+              }
+              if (judged && !judged.valid) {
+                log(`${aiProviderLabel(aiProvider)} attempt ${i + 1} was invalid (${judged.reason || "no reason"}) — regenerating.`);
+                reply = "";
+                continue;
               }
               log(`${aiProviderLabel(aiProvider)} attempt ${i + 1} not worth posting (${judged?.reason ?? "no reason"}) — regenerating.`);
               reply = "";
@@ -1576,6 +1608,11 @@ async function main() {
               if (isHeavyPidgin(ft.text)) {
                 logTweetOutcome("SKIP", ft.url, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply", ft.author);
                 markReplied(ft.id, "heavy Nigerian Pidgin, skipping to avoid an out-of-context reply");
+                continue;
+              }
+              if (isQuoteBaitTweet(ft.text)) {
+                logTweetOutcome("SKIP", ft.url, "quote-tweet engagement bait", ft.author);
+                markReplied(ft.id, "quote-tweet engagement bait");
                 continue;
               }
               const ftAgeMs = Date.now() - ft.createdAt.getTime();
