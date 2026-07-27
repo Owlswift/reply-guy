@@ -55,7 +55,9 @@ const URGENT_HANDLES: string[] = [
   "@rachcorrine",
   "@SIGMAPROFESSOR",
   "@YourPrimePath",
-  "@yxng_samyaa"
+  "@yxng_samyaa",
+  "@heyzuesx",
+  "@_Hybreed_"
 ];
 
 const URGENT_BONUS = 1000; // massive score boost for urgent handles
@@ -84,10 +86,17 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@Laiiyylaa",
   "@ErikDavis",
   "@miiagarro",
-  "@TyyTyra",
+  // "@TyyTyra",
   "@MegOfficiall",
   "@jas_d_barbie",
-  "@Miranizimmm"
+  "@Miranizimmm",
+  "@niy2pretty",
+  "@ceraliza",
+  "@luv1bun",
+  "@qoyyrazalq",
+  "@EvelyndefnotEve",
+  "@ChelfcAbby",
+  "@cyberfeeIs"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -149,8 +158,8 @@ export const LOW_PRIORITY_HANDLES: string[] = [
  */
 export const BLOCKED_HANDLES: string[] = [
   "@Mario_Sneh",
+  "lyleswontmiss",
   "@unfairleverage",
-  "@TyyTyra"
 ];
 
 /**

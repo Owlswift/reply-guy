@@ -225,12 +225,37 @@ process.on("uncaughtException", (err) => {
 const WATCHDOG_CHECK_INTERVAL_MS = 15_000;
 const WATCHDOG_HANG_THRESHOLD_MS = 3 * 60 * 1000; // 3 min — comfortably above the ~2 min worst-case legitimate silent gap (ChatGPT generation wait)
 
+// A separate signal from the log-silence check above — that one only
+// catches a TOTALLY silent/frozen process, but a stuck state can still be
+// "busy" (scrolling, logging, retrying a failing goto) every few seconds
+// forever without ever actually processing a tweet. Confirmed live: X's
+// compose/post page blocked every notifications navigation attempt with
+// net::ERR_ABORTED, and the app just kept retrying every ~4s continuously,
+// producing constant log output the silence-based watchdog could never
+// catch. Track the last time a tweet was actually found or processed
+// instead (markTweetActivity(), called from the main loop below), and
+// hard-exit if that goes stale — same restart-via-supervisor recovery.
+let lastTweetActivityAt = Date.now();
+const NO_PROGRESS_THRESHOLD_MS = 10 * 60 * 1000; // 10 min
+
+function markTweetActivity(): void {
+  lastTweetActivityAt = Date.now();
+}
+
 function startWatchdog(): NodeJS.Timeout {
   const timer = setInterval(() => {
     const silence = msSinceLastLog();
     if (silence > WATCHDOG_HANG_THRESHOLD_MS) {
       console.error(
         `\n[Watchdog] No activity for ${Math.round(silence / 1000)}s — the browser/CDP connection is likely hung. Exiting so a supervisor can restart the process.\n`
+      );
+      process.exit(1);
+    }
+
+    const noProgress = Date.now() - lastTweetActivityAt;
+    if (noProgress > NO_PROGRESS_THRESHOLD_MS) {
+      console.error(
+        `\n[Watchdog] No tweet found or processed in ${Math.round(noProgress / 1000)}s despite ongoing activity — likely stuck on a blocking page/dialog. Exiting so a supervisor can restart the process.\n`
       );
       process.exit(1);
     }
@@ -476,6 +501,7 @@ async function main() {
       // Genuinely new, not-yet-replied posts to work through — reset the
       // empty-scroll counter now that real progress is happening again.
       consecutiveEmptyScrolls = 0;
+      markTweetActivity();
 
       // Log each notification with score
       console.log("\n📋 New post notifications:");
@@ -836,6 +862,7 @@ async function main() {
           // Scroll position is now saved inside BrowserNavigator.openTweet()
           // itself — centralized so every caller gets it, not just this one.
           await navigator.openTweet(item.url);
+          markTweetActivity();
 
           // Skip if we can't reply
           const replyButton = page.locator('[data-testid="reply"]').first();
@@ -1588,6 +1615,7 @@ async function main() {
           console.log("  → Checking for new notifications...");
           const freshTweets = await notificationSource.getTweets(page, navigator, true);
           if (freshTweets.length > 0) {
+            markTweetActivity();
             const replyRatio2 = getReplyRatio();
             logTableHeader();
             for (const ft of freshTweets) {

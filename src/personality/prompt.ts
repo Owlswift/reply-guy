@@ -42,6 +42,7 @@ function buildContextUnderstandingStep(): string {
   return `
 STAGE 1 — UNDERSTAND BEFORE YOU WRITE. Do this silently in your head before drafting anything. Work through, in order:
 
+0. Language — what language is this tweet actually written in? (Spanish, French, Portuguese, Arabic, Yoruba, Hausa, English, etc. — Pidgin and regional English dialects count as English.) This is not a stylistic detail — your reply in STAGE 2 MUST be written in this exact same language, not translated to or defaulted into English. If the tweet is in Spanish, write your reply in Spanish. If it's in French, write it in French. Only reply in English if the tweet itself is actually in English.
 1. Literal meaning — what is this tweet actually saying, in plain terms?
 2. Implied meaning — what's underneath the literal words? What is the author actually getting at?
 3. Emotional tone — how does the author feel about what they're describing (proud, embarrassed, joking, hurt, matter-of-fact, wholesome)?
@@ -1362,6 +1363,8 @@ export function buildPersonalityPrompt(
   // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
   // Placing it here ensures every single prompt variant gets this reinforcement.
   const finalGuardrail = `\n\nSTAGE 2 — WRITE NOW, strictly inside the premise you identified in STAGE 1 above. Never replace the joke with a different joke. Never reinterpret the tweet's humor, tone, or premise if it already comes from the author's own framing — extend it, don't override it. Everything below governs HOW you write; it never overrides WHAT you determined the tweet actually means.
+
+Write your reply in the SAME LANGUAGE you identified in STAGE 1, step 0 — never default to English for a tweet written in another language. This overrides nothing else below; it's about what language the words are in, not the tone or style.
 
 Your job right now is to REACT to this tweet — not analyze it, and not regurgitate it. Those are two different failures with the same root cause: analyzing sounds like presenting findings ("the part that stands out is..."), regurgitating sounds like a recap (the tweet's own point, reworded). A real reaction does neither — it's just what you'd actually say back, nothing more, nothing more polished. People on X react to posts. They don't analyze or summarize them.
 
