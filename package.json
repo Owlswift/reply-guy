@@ -23,7 +23,8 @@
     "test:reply": "tsx src/reply/test.ts",
     "test:scraper": "tsx src/scraper/test.ts",
     "test:twitter": "tsx src/twitter/test.ts",
-    "test:twitter-mentions": "tsx src/twitter/test-mentions.ts"
+    "test:twitter-mentions": "tsx src/twitter/test-mentions.ts",
+    "engage": "tsx src/cli/engage.ts"
   },
   "keywords": [],
   "author": "",

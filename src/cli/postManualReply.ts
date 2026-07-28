@@ -42,7 +42,7 @@ export async function hasManualReply(page: Page): Promise<boolean> {
  * browser) — callers own their own bookkeeping (markReplied, stats,
  * memory) based on this result, since that differs between callers.
  */
-export async function postManualReply(page: Page, authorHandle: string): Promise<ManualReplyResult> {
+export async function postManualReply(page: Page, authorHandle: string, targetTweetId?: string): Promise<ManualReplyResult> {
   const manualReply = await promptWithTimeout(
     "\nType your reply and press Enter to post it (leave blank if you'd rather type it directly in the browser): ",
     MANUAL_REPLY_TIMEOUT_MS
@@ -50,7 +50,7 @@ export async function postManualReply(page: Page, authorHandle: string): Promise
 
   if (manualReply) {
     try {
-      await prepareReply(page, manualReply);
+      await prepareReply(page, manualReply, targetTweetId);
       const success = await clickReply(page, authorHandle);
       if (success) {
         return { posted: true, finalReply: manualReply };

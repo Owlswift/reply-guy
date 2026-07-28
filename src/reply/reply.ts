@@ -7,10 +7,11 @@ import { logReply } from "../core/logger";
 // Fill the reply textbox (without submitting)
 export async function prepareReply(
   page: Page,
-  reply: string
+  reply: string,
+  targetTweetId?: string
 ): Promise<void> {
   // Click the reply button
-  await openReplyBox(page);
+  await openReplyBox(page, targetTweetId);
 
   // Type the reply
   await typeReply(page, reply);

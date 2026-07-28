@@ -58,23 +58,47 @@ ensure_docker() {
   log "Docker did not come up within 2 minutes — continuing anyway."
 }
 
+CHROME_DEBUG_PORT=9222
+CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Profile Echo actually automates (already signed into the target X
+# account) — only used for the cold-start fallback below. Override with
+# CHROME_PROFILE_DIRECTORY=... if that ever changes.
+CHROME_PROFILE_DIRECTORY="${CHROME_PROFILE_DIRECTORY:-Profile 2}"
+
+chrome_debug_up() {
+  curl -s "http://127.0.0.1:${CHROME_DEBUG_PORT}/json/version" > /dev/null 2>&1
+}
+
+# Talks to the debug-enabled Chrome instance directly over its own CDP HTTP
+# API instead of `open -a "Google Chrome"` / AppleScript's
+# `tell application "Google Chrome"`. Both of those always address macOS's
+# default LaunchServices Chrome instance — with a second, debug-flagged
+# Chrome process also running (the one Echo actually connects to over CDP,
+# started with --remote-debugging-port), that's the WRONG one: it opened a
+# separate default-profile Chrome window every few minutes instead of
+# reusing the existing debug instance. Going straight through the debug
+# port removes the ambiguity — there's only one process listening there.
 ensure_chrome_xcom() {
-  if ! pgrep -f "Google Chrome" > /dev/null 2>&1; then
-    log "Chrome is not running — launching and opening x.com..."
-    open -a "Google Chrome" "https://x.com"
+  if ! chrome_debug_up; then
+    log "No debug-enabled Chrome on port ${CHROME_DEBUG_PORT} — launching \"${CHROME_PROFILE_DIRECTORY}\" with remote debugging..."
+    nohup "$CHROME_BIN" \
+      --remote-debugging-port="$CHROME_DEBUG_PORT" \
+      --profile-directory="$CHROME_PROFILE_DIRECTORY" \
+      "https://x.com" > /dev/null 2>&1 &
+    disown
+    for _ in $(seq 1 30); do
+      chrome_debug_up && { log "Debug Chrome instance is up."; return; }
+      sleep 1
+    done
+    log "Debug Chrome instance did not come up within 30s."
     return
   fi
+
   local has_tab
-  has_tab=$(osascript -e 'tell application "Google Chrome"
-    repeat with w in windows
-      repeat with t in tabs of w
-        if URL of t contains "x.com" then return "yes"
-      end repeat
-    end repeat
-    return "no"' 2>/dev/null)
-  if [[ "$has_tab" != "yes" ]]; then
-    log "Chrome is running but has no x.com tab — opening one..."
-    osascript -e 'tell application "Google Chrome" to open location "https://x.com"'
+  has_tab=$(curl -s "http://127.0.0.1:${CHROME_DEBUG_PORT}/json/list" | grep -c '"url": *"https://x\.com')
+  if [[ "$has_tab" == "0" ]]; then
+    log "Debug Chrome is running but has no x.com tab — opening one..."
+    curl -s "http://127.0.0.1:${CHROME_DEBUG_PORT}/json/new?https://x.com" > /dev/null
   fi
 }
 
