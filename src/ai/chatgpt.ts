@@ -3,7 +3,7 @@ import { getBrowserAndContext } from "../browser/browser";
 import { buildPrompt, PromptInput } from "./buildPrompt";
 import { log } from "../utils/logger";
 import { isLikelyAiErrorMessage } from "./errorDetection";
-import { parseStructuredReply } from "./parseStructuredReply";
+import { parseStructuredReply, lowercaseFirstLetter } from "./parseStructuredReply";
 
 /**
  * ChatGPTClient - Automates chat.openai.com via Playwright
@@ -43,13 +43,50 @@ export class ChatGPTClient {
    * @returns The generated reply text
    */
   async generateReply(input: PromptInput): Promise<string> {
+    // Build the prompt exactly as Echo's personality system does
+    const { prompt } = await buildPrompt(input);
+    const reply = await this.sendPromptAndReadReply(prompt);
+
+    // The prompt asks for "UNDERSTANDING: ...\nREPLY: ..." (prompt.ts's
+    // Stage 1/Stage 2 structure) so the model's own read on the tweet is
+    // visible for a human to assess, not just its final output. Log it
+    // and return only the reply text — the understanding is never itself
+    // part of what gets posted.
+    const { understanding, reply: replyText } = parseStructuredReply(reply);
+    if (understanding) {
+      log(`[ChatGPT] Understanding: ${understanding}`);
+    } else {
+      log(`[ChatGPT] No structured understanding found in response — model didn't follow the output format this time.`);
+    }
+
+    return replyText;
+  }
+
+  /**
+   * Send a fully pre-built prompt straight to ChatGPT, bypassing buildPrompt.
+   *
+   * generateReply() always re-runs the standalone-tweet personality pipeline
+   * (classifyTweet/analyzeTweet/buildPersonalityPrompt) on whatever "tweet"
+   * text it's given — including instructions like "you are NOT talking to
+   * them directly," which is wrong for a reply that's actually addressed to
+   * a specific commenter (e.g. engage.ts's thread-reply flow). Callers that
+   * already built their own complete, purpose-specific prompt (like
+   * genAIEngagePrompt) need it sent as-is, not re-classified and wrapped
+   * inside an unrelated template.
+   */
+  async generateRawReply(prompt: string): Promise<string> {
+    return lowercaseFirstLetter((await this.sendPromptAndReadReply(prompt)).trim());
+  }
+
+  /**
+   * Type a prompt into ChatGPT, wait for generation to finish, and return
+   * the raw assistant response text after basic validity checks.
+   */
+  private async sendPromptAndReadReply(prompt: string): Promise<string> {
     const page = this.page;
     if (!page) {
       throw new Error("ChatGPTClient not initialized. Call init() first.");
     }
-
-    // Build the prompt exactly as Echo's personality system does
-    const { prompt } = await buildPrompt(input);
 
     // Find the input field
     const inputField = page.locator(".ProseMirror");
@@ -108,19 +145,7 @@ export class ChatGPTClient {
       throw new Error(`ChatGPT returned HTML content instead of text: ${reply.substring(0, 100)}`);
     }
 
-    // The prompt asks for "UNDERSTANDING: ...\nREPLY: ..." (prompt.ts's
-    // Stage 1/Stage 2 structure) so the model's own read on the tweet is
-    // visible for a human to assess, not just its final output. Log it
-    // and return only the reply text — the understanding is never itself
-    // part of what gets posted.
-    const { understanding, reply: replyText } = parseStructuredReply(reply);
-    if (understanding) {
-      log(`[ChatGPT] Understanding: ${understanding}`);
-    } else {
-      log(`[ChatGPT] No structured understanding found in response — model didn't follow the output format this time.`);
-    }
-
-    return replyText;
+    return reply;
   }
 
   /**

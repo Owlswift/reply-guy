@@ -63,6 +63,15 @@ export interface TweetDetails {
   // isRoot is false (i.e. there's actually somewhere else to redirect to).
   rootId?: string;
   rootUrl?: string;
+  // Is this post actually part of a multi-tweet thread, in EITHER
+  // direction? True if isRoot is false (this segment has an earlier
+  // same-author predecessor — the backward walk found it), OR if the
+  // forward walk below found later same-author segments and merged them
+  // into fullText. The much more common case in practice is the second
+  // one: Echo almost always opens/replies to a thread's ROOT (isRoot is
+  // true for it by definition), so relying on isRoot alone to detect
+  // "this author posts threads" misses nearly every real thread.
+  isThread: boolean;
 }
 
 const TIME_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
@@ -407,6 +416,8 @@ export async function extractCurrentTweet(
     return null;
   }
 
+  const isThread = !isRoot || threadTexts.length > 1;
+
   return {
     author: rootHandle,
     handle: rootHandle,
@@ -417,6 +428,7 @@ export async function extractCurrentTweet(
     latestSegmentAt,
     replies,
     isRoot,
+    isThread,
     ...(quotedTweet?.text ? { quotedTweet: quotedTweet.text } : {}),
     ...(quotedTweet?.handle ? { quotedTweetHandle: quotedTweet.handle } : {}),
     ...(quotedTweet?.id ? { quotedTweetId: quotedTweet.id } : {}),

@@ -31,18 +31,21 @@ const FALLBACK: Omit<JudgedReply, "reply"> = {
  * Step 4: Validate and judge whether a reply is actually worth posting.
  *
  * Two questions, one pass: is this a real, postable reply at all, and (only
- * if so) does it make the thread better? The bar for the second question
- * isn't "is this educational" — it's: would a stranger scrolling this
- * thread think this reply was worth reading? A reply clears that bar if it
- * does at least one of: adds a useful insight, shares a relatable
- * experience, makes a relevant joke, challenges the premise respectfully,
- * asks a thoughtful question, provides missing context, or extends the
- * discussion. Generic filler ("I agree", "😂😂😂", "That's true") clears
- * none of those and should be rejected regardless of how "correct" it is.
+ * if so) does it read like something a real person would type? The bar for
+ * the second question is deliberately NOT "does this add value" — requiring
+ * every reply to teach something, land a joke, or extend the discussion is
+ * exactly what makes an account read as AI rather than a person who's just
+ * scrolling. A short, ordinary reaction with some specificity/personality
+ * to it is a normal, worth-posting reply on its own. What still gets
+ * rejected: content that's too polished/over-explained (reads like a
+ * caption or a mini-essay), and zero-effort copy-paste filler with no
+ * specificity to this tweet ("I agree", "😂😂😂") or that just restates the
+ * tweet back.
  */
 export async function judgeReplies(
   tweet: string,
-  replies: string[]
+  replies: string[],
+  replyingTo?: string
 ): Promise<JudgedReply[]> {
   const results: JudgedReply[] = [];
 
@@ -57,6 +60,9 @@ export async function judgeReplies(
           role: "system",
           content: `
 You are validating AND judging a candidate reply to a tweet on X (Twitter), before it gets posted.
+${replyingTo ? `
+This candidate is a reply to a SPECIFIC COMMENT in a thread, not to the original tweet directly. The original tweet is background context only. Your quality judgment must be based on whether the candidate directly engages with what the comment actually said — its specific point, question, or tone. A reply that is on-topic for the original tweet but ignores or talks past the comment is NOT worth posting, no matter how well-written.
+` : ""}
 
 FIRST — validity. Would a real human intentionally post this exact text as their own reply? Reject as INVALID (regardless of how well-written it might otherwise read) if it is any of:
 - An AI provider error message (rate limit, usage limit, authentication error, timeout, "connection interrupted", a Cloudflare/consent wall, etc.)
@@ -69,39 +75,33 @@ FIRST — validity. Would a real human intentionally post this exact text as the
 
 If any of those apply, set "valid": false, "worth_posting": false, "score": 0, and briefly say which one in "reason" — skip the quality judgment entirely.
 
-SECOND — only if valid, judge quality. The question isn't whether the reply is educational or grammatically correct. It's: would a stranger scrolling this thread think this reply was worth reading? Does it make the thread better?
+SECOND — only if valid, judge whether this reads like something a real person would actually type, not whether it's insightful. The question isn't "does this add value" — it's: would this look at home in a normal person's reply history, sitting next to their other casual replies? A short, ordinary reaction that teaches the reader nothing new is a completely normal, worth-posting reply. Most real replies on X are exactly that.
 
-A reply is worth posting if it does AT LEAST ONE of:
-- adds a useful insight
-- shares a relatable experience
-- makes a relevant joke
-- challenges the premise respectfully
-- asks a thoughtful question
-- provides missing context
-- extends the discussion
+Reject as NOT worth posting if the candidate is:
+- Too polished or over-explained — reads like a caption, a LinkedIn post, or has an obvious "analysis voice" structure (a tidy reframe, a built-to-be-quoted line, a mini-essay explaining the deeper meaning of a tweet that didn't need one).
+- Zero-effort copy-paste filler with no specificity to ${replyingTo ? "the comment" : "the tweet"} — a bare "I agree" / "this is so relatable" / "😂😂😂" that could sit under literally any tweet, or a reply that just restates ${replyingTo ? "the comment" : "the tweet"} back in different words.
 
-Generic filler ("I agree", "That's true", "😂😂😂", or anything that just
-restates the tweet) is NOT worth posting, even if it's on-topic and
-grammatically fine.
+Otherwise it's worth posting — including a short reaction, a one-line joke, a casual opinion, or simple agreement WITH some personality or specificity to it (as opposed to the generic zero-effort version above). Don't require insight, a lesson, a challenge, or an extension of the discussion — demanding that on every reply is exactly what makes an account read as an AI account instead of a person who's just scrolling.
 
 Return JSON only:
 
 {
   "valid": true or false,
   "worth_posting": true or false,
-  "contribution_type": "insight" | "experience" | "joke" | "challenge" | "question" | "context" | "extension" | "none",
+  "contribution_type": "reaction" | "joke" | "opinion" | "agreement" | "question" | "experience" | "insight" | "none",
   "score": 0,
   "reason": "one sentence"
 }
 
-"score" is 0-10 and reflects overall quality — used only to rank replies
-against each other, not as the pass/fail bar. Output ONLY the JSON.
+"score" is 0-10 and reflects how natural/human this reads (not how much it
+teaches) — used only to rank replies against each other, not as the
+pass/fail bar. Output ONLY the JSON.
 `
         },
         {
           role: "user",
           content: `
-Tweet: ${tweet}
+${replyingTo ? `Original tweet (background only): ${tweet}\n\nComment being replied to (judge against this): ${replyingTo}` : `Tweet: ${tweet}`}
 
 Reply: ${reply}
 

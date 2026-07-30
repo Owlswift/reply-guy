@@ -34,3 +34,17 @@ export async function getReplyCountsPerHour(): Promise<Array<{ hour: string; cou
     .map(([hour, count]) => ({ hour, count: parseInt(count, 10) || 0 }))
     .sort((a, b) => a.hour.localeCompare(b.hour));
 }
+
+/**
+ * Sum of every hour-bucket for today (server-local calendar day, same
+ * "YYYY-MM-DD" prefix as hourKey()'s ISO string) — the dispatcher's daily
+ * cap check. Reuses the existing per-hour hash rather than a second
+ * counter, so there's only ever one source of truth for reply volume.
+ */
+export async function getTodayReplyCount(): Promise<number> {
+  const todayPrefix = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const all = await getReplyCountsPerHour();
+  return all
+    .filter((h) => h.hour.startsWith(todayPrefix))
+    .reduce((sum, h) => sum + h.count, 0);
+}

@@ -120,29 +120,29 @@ export async function extractTweets(
             // before ever navigating to them.
             const hasImage = !!article.querySelector('[data-testid="tweetPhoto"]');
 
-            // Detect "Replying to @X" (same signal visitProfile.ts's isReply
-            // uses). This catches both genuine replies and, more relevantly
-            // here, self-thread continuations: X surfaces each part of a
-            // multi-tweet thread as its own top-level article with its own
-            // tweet id, even though it's really a continuation of an
-            // earlier story rather than a fresh one. Find the innermost
-            // (shortest) matching element rather than the whole article —
-            // every ancestor of the "Replying to" line also starts with
-            // that text since it's a prefix of the article's full text.
-            const isReply = (article.textContent ?? "").trim().startsWith("Replying to");
-            let replyingToHandle = "";
-            if (isReply) {
-                const candidates = Array.from(article.querySelectorAll("div, span")) as any[];
-                let tightest: any = null;
-                let tightestLen = Infinity;
-                for (const c of candidates) {
-                    const t = (c.textContent ?? "").trim();
-                    if (t.startsWith("Replying to") && t.length < 150 && t.length < tightestLen) {
-                        tightest = c;
-                        tightestLen = t.length;
-                    }
+            // Detect "Replying to @X". Find the innermost (shortest)
+            // matching div/span anywhere in the article rather than
+            // requiring the article's whole flattened textContent to start
+            // with it — the author name/handle/timestamp header renders
+            // (and sits in the DOM) before the "Replying to" line on every
+            // feed/notification card, so an anchored-at-position-0 check
+            // never matches those and silently drops real replies. Scanning
+            // for the substring anywhere is the same approach
+            // extractThreadReplies.ts already uses for this exact signal.
+            const candidates = Array.from(article.querySelectorAll("div, span")) as any[];
+            let tightest: any = null;
+            let tightestLen = Infinity;
+            for (const c of candidates) {
+                const t = (c.textContent ?? "").trim();
+                if (t.startsWith("Replying to") && t.length < 150 && t.length < tightestLen) {
+                    tightest = c;
+                    tightestLen = t.length;
                 }
-                const replyAnchor = tightest?.querySelector('a[href^="/"]');
+            }
+            const isReply = !!tightest;
+            let replyingToHandle = "";
+            if (tightest) {
+                const replyAnchor = tightest.querySelector('a[href^="/"]');
                 const replyHref = replyAnchor?.getAttribute("href") ?? "";
                 replyingToHandle = replyHref.replace(/^\//, "").split("/")[0] ?? "";
             }

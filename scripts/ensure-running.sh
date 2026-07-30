@@ -47,6 +47,27 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1"
 }
 
+# The dispatcher (src/dispatcher.ts) is the only thing that ever actually
+# posts a queued reply — a genuinely separate process from the main bot,
+# not an alternative to it, so it needs its own independent
+# check-and-start, not folded into is_running()/the branches above. Called
+# unconditionally, regardless of whatever the main-bot check above decided.
+is_dispatcher_running() {
+  pgrep -f "src/dispatcher.ts" > /dev/null 2>&1 ||
+  pgrep -f "scripts/watch-and-restart-dispatcher.sh" > /dev/null 2>&1
+}
+
+ensure_dispatcher() {
+  if is_dispatcher_running; then
+    log "Dispatcher is already running."
+    return
+  fi
+  log "Dispatcher is not running — starting under supervision..."
+  nohup npm run dispatcher:watch >> "logs/dispatcher.log" 2>&1 &
+  disown
+  log "Dispatcher started (PID $!). Logging to logs/dispatcher.log."
+}
+
 ensure_docker() {
   docker info > /dev/null 2>&1 && return 0
   log "Docker is not running — launching Docker Desktop..."
@@ -104,6 +125,7 @@ ensure_chrome_xcom() {
 
 if is_running; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') Echo is already running."
+  ensure_dispatcher
   exit 0
 fi
 
@@ -121,6 +143,7 @@ ensure_chrome_xcom
 # the docker/chrome wait.
 if is_running; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') Echo started running while waiting on docker/chrome — not launching a second instance."
+  ensure_dispatcher
   exit 0
 fi
 
@@ -128,6 +151,7 @@ if [[ "$1" == "--foreground" || "$1" == "-t" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') Echo is not running — opening a Terminal window..."
   PROJECT_DIR="$(pwd)"
   osascript -e "tell application \"Terminal\" to do script \"cd '$PROJECT_DIR' && npm run start:interactive:watch | tee -a '$LOG_FILE'\""
+  ensure_dispatcher
   exit 0
 fi
 
@@ -135,3 +159,4 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Echo is not running — starting under superv
 nohup npm run start:interactive:watch >> "$LOG_FILE" 2>&1 &
 disown
 echo "$(date '+%Y-%m-%d %H:%M:%S') Started (PID $!). Logging to $LOG_FILE."
+ensure_dispatcher

@@ -3,6 +3,7 @@ import { openReplyBox } from "./openReplyBox";
 import { typeReply } from "./typeReply";
 import { submitReply } from "./submitReply";
 import { logReply } from "../core/logger";
+import { recordReplyForHour } from "../storage/hourlyReplyStats";
 
 // Fill the reply textbox (without submitting)
 export async function prepareReply(
@@ -43,6 +44,15 @@ export async function clickReply(
     time: new Date().toISOString()
   });
 
+  // Every reply-posting path in this codebase (main-interactive.ts,
+  // notifications.ts/engage.ts via processReply.ts, catchup/runCatchup.ts,
+  // postManualReply.ts) funnels through this one function, so recording the
+  // hourly count here — instead of at each caller individually — is what
+  // makes storage/hourlyReplyStats.ts an accurate total across all of them.
+  if (success) {
+    await recordReplyForHour().catch(() => {});
+  }
+
   return success;
 }
 
@@ -58,19 +68,10 @@ export async function replyToTweet(
   // Type the reply
   await typeReply(page, reply);
 
-  // Submit (or just log in dry-run mode)
-  const success = await submitReply(page);
-
-  // Log the result
-  logReply({
-    tweet: page.url(),
-    author,
-    reply,
-    success,
-    time: new Date().toISOString()
-  });
-
-  return success;
+  // Routed through clickReply() (rather than a second submitReply()/
+  // logReply() of its own) so this path also counts toward
+  // storage/hourlyReplyStats.ts instead of silently under-reporting it.
+  return clickReply(page, author);
 }
 
 // Verify the post button exists

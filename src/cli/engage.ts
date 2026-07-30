@@ -3,42 +3,21 @@ import { getBrowserAndContext } from "../browser/browser";
 import { ChatGPTClient } from "../ai/chatgpt";
 import { extractThreadReplies } from "../engage/extractThreadReplies";
 import { classifyReply } from "../engage/classifyReply";
-import { genAIEngagePrompt } from "../engage/engagePrompt";
-import { judgeReplies } from "../ai/judgeReply";
-import { validateReply } from "../personality/validator";
-import { isDuplicate } from "../personality/duplicate";
 import { MemoryRepository } from "../database/MemoryRepository";
-import { prepareReply, clickReply } from "../reply/reply";
-import { postManualReply } from "../cli/postManualReply";
-import { promptReplyDecision } from "../cli/promptReplyDecision";
 import { log } from "../utils/logger";
 import {
-  getOrCreateConversation,
   addReplyNode,
   hasRepliedToReply,
-  buildConversationContext,
+  getOrCreateConversation,
 } from "../engage/threadConversationTracker";
-import { getNextWaitTime, hasReachedMaxReplies, formatWaitTime } from "../engage/rateLimiter";
-import { ReplyClassification, ReplyClass } from "../engage/types";
-
-const MIN_DELAY_MS = 4000;
-const MAX_DELAY_MS = 9000;
-
-async function pace(): Promise<void> {
-  const delay = MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS);
-  await new Promise(r => setTimeout(r, delay));
-}
-
-function shouldSkipReply(classification: ReplyClassification): boolean {
-  const skipClasses: ReplyClass[] = ["SPAM", "BOT", "EMOJI_ONLY", "TAGGING_FRIEND"];
-  if (skipClasses.includes(classification.replyClass)) return true;
-  if (classification.engagementDecision === "IGNORE") return true;
-  return false;
-}
-
-function shouldEndConversation(classification: ReplyClassification): boolean {
-  return classification.engagementDecision === "END_CONVERSATION";
-}
+import { hasReachedMaxReplies } from "../engage/rateLimiter";
+import {
+  shouldSkipReply,
+  shouldEndConversation,
+  postClosingReaction,
+  handleReply,
+  pace,
+} from "../engage/processReply";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -130,7 +109,7 @@ async function main() {
 
     // Classify the reply
     console.log(`  🔍 Classifying reply from ${reply.authorHandle}: "${reply.text.substring(0, 60)}..."`);
-    const classification = await classifyReply(reply.text);
+    const classification = await classifyReply(reply.text, threadData.rootTweetText);
     console.log(`    Class: ${classification.replyClass} | Decision: ${classification.engagementDecision} | Reason: ${classification.reason}`);
 
     if (shouldSkipReply(classification)) {
@@ -138,13 +117,9 @@ async function main() {
       continue;
     }
 
-    if (shouldEndConversation(classification)) {
-      console.log(`  🏁 Ending conversation with ${reply.authorHandle}`);
-      conversationsEnded++;
-      continue;
-    }
-
-    // Record their reply in the tree
+    // Record their reply in the tree — done for every processed reply
+    // (not just ones we go on to answer) so future scans can tell we've
+    // already seen it, including the END_CONVERSATION case below.
     addReplyNode(threadData.rootTweetId, {
       replyId: reply.id,
       authorHandle: reply.authorHandle,
@@ -155,9 +130,33 @@ async function main() {
       isByMe: reply.isByMe,
     });
 
-    if (classification.engagementDecision === "LIKE_ONLY") {
-      console.log(`  ❤️ Liking ${reply.authorHandle}'s reply (LIKE_ONLY)`);
-      likesGiven++;
+    // Both END_CONVERSATION (simple agreement — "facts", "this") and
+    // LIKE_ONLY (praise, well-wishes, thanks, etc.) get the same short
+    // closing reaction rather than a full generated reply — LIKE_ONLY used
+    // to trigger no actual action at all beyond a log line, which reads as
+    // ignoring the person no matter what kind of positive comment it was.
+    if (shouldEndConversation(classification) || classification.engagementDecision === "LIKE_ONLY") {
+      const isLikeOnly = classification.engagementDecision === "LIKE_ONLY";
+      console.log(
+        isLikeOnly
+          ? `  ❤️ Reacting to ${reply.authorHandle}'s reply (LIKE_ONLY)`
+          : `  🏁 Ending conversation with ${reply.authorHandle}`
+      );
+      const posted = await postClosingReaction({
+        browserContext: context,
+        threadData,
+        reply,
+        echoHandle,
+      });
+      if (isLikeOnly) {
+        likesGiven++;
+      } else {
+        conversationsEnded++;
+      }
+      if (posted) {
+        repliesPosted++;
+      }
+      await pace();
       continue;
     }
 
@@ -165,158 +164,22 @@ async function main() {
       continue;
     }
 
-    // === PAUSE FOR OPERATOR DECISION ===
-    console.log(`  💬 Pausing for your decision on ${reply.authorHandle}'s reply...`);
-    const decision = await promptReplyDecision(
-      reply.authorHandle,
-      `[Replying to a comment on your tweet]\n\nOriginal tweet: ${threadData.rootTweetText}\n\nComment from ${reply.authorHandle}: ${reply.text}`
-    );
+    const outcome = await handleReply({
+      browserContext: context,
+      chatgpt,
+      memoryRepo,
+      threadData,
+      reply,
+      echoHandle,
+    });
 
-    if (decision === "skip" || decision === "timeout") {
-      console.log(`  ⏭ ${decision === "skip" ? "Operator chose to skip" : "No response, skipping"} ${reply.authorHandle}`);
-      continue;
+    if (outcome.posted) {
+      repliesPosted++;
     }
-
-    if (decision === "myself") {
-      // Open a fresh tab for this reply's own permalink before posting
-      const replyPermalink = `https://x.com/${reply.authorHandle.replace(/^@/, "")}/status/${reply.id}`;
-      const replyPage = await context.newPage();
-      try {
-        await replyPage.goto(replyPermalink, { waitUntil: "domcontentloaded", timeout: 15000 });
-        await replyPage.waitForSelector("article", { timeout: 10000 });
-        await new Promise(r => setTimeout(r, 1800));
-      } catch {
-        console.log(`  ⚠️ Could not navigate to reply page for manual reply`);
-      }
-
-      const manualResult = await postManualReply(replyPage, reply.authorHandle, reply.id);
-      if (manualResult.posted) {
-        addReplyNode(threadData.rootTweetId, {
-          replyId: `echo-${Date.now()}`,
-          authorHandle: echoHandle,
-          text: manualResult.finalReply,
-          parentReplyId: reply.id,
-          depth: reply.depth + 1,
-          createdAt: Date.now(),
-          isByMe: true,
-        });
-        repliesPosted++;
-        console.log(`  ✅ Manual reply posted to ${reply.authorHandle}`);
-      }
-      await replyPage.close().catch(() => {});
-      await pace();
-      continue;
-    }
-
-    // === CHATGPT GENERATION ===
-    console.log(`  💬 Generating reply to ${reply.authorHandle} via ChatGPT...`);
-    const conversationContext = buildConversationContext(threadData.rootTweetId, threadData.rootTweetText);
-    const prompt = genAIEngagePrompt(threadData, reply, conversationContext);
-
-    let aiReply = "";
-    let bestReply = "";
-    let bestScore = -1;
-
-    for (let i = 0; i < 3; i++) {
-      try {
-        aiReply = await chatgpt.generateReply({
-          tweet: prompt,
-          relationship: "stranger",
-          memories: await memoryRepo.getRecentMemories(20),
-        });
-      } catch (err) {
-        log(`[Engage] ChatGPT attempt ${i + 1} failed: ${err}`);
-        aiReply = "";
-        continue;
-      }
-
-      if (!validateReply(aiReply) || isDuplicate(aiReply)) {
-        aiReply = "";
-        continue;
-      }
-
-      const [judged] = await judgeReplies(threadData.rootTweetText, [aiReply]);
-      if (judged && judged.valid && judged.score > bestScore) {
-        bestReply = aiReply;
-        bestScore = judged.score;
-      }
-
-      if (judged?.worthPosting) break;
-      if (judged && !judged.valid) {
-        log(`[Engage] Attempt ${i + 1} was invalid (${judged.reason || "no reason"}) — regenerating.`);
-        aiReply = "";
-        continue;
-      }
-      log(`[Engage] Attempt ${i + 1} not worth posting (${judged?.reason ?? "no reason"}) — regenerating.`);
-      aiReply = "";
-    }
-
-    if (!aiReply && bestReply) {
-      log(`[Engage] No draft cleared the bar — using best-effort fallback (score ${bestScore}).`);
-      aiReply = bestReply;
-    }
-
-    if (!aiReply || !validateReply(aiReply)) {
-      console.log(`  ❌ Failed to generate a valid reply for ${reply.authorHandle} — skipping.`);
-      continue;
-    }
-
-    console.log(`  ✏️ Draft: "${aiReply}"`);
-
-    // === POST THE REPLY ===
-    // Open a fresh tab for this reply's own permalink so the reply is
-    // threaded under the correct comment, not the root tweet.
-    const replyPermalink = `https://x.com/${reply.authorHandle.replace(/^@/, "")}/status/${reply.id}`;
-    const replyPage = await context.newPage();
-    try {
-      await replyPage.goto(replyPermalink, { waitUntil: "domcontentloaded", timeout: 15000 });
-      await replyPage.waitForSelector("article", { timeout: 10000 });
-      // Wait for replies to mount (same 1.8s wait catchupPriorityHandles uses)
-      await new Promise(r => setTimeout(r, 1800));
-    } catch (err) {
-      log(`[Engage] Failed to navigate to reply page: ${err}`);
-      await replyPage.close().catch(() => {});
-      continue;
-    }
-
-    // Check reply availability
-    const replyButton = replyPage.locator('[data-testid="reply"]').first();
-    if (!(await replyButton.isVisible({ timeout: 5000 }).catch(() => false))) {
-      console.log(`  ⚠️ Reply button unavailable for ${replyPermalink} — skipping.`);
-      await replyPage.close().catch(() => {});
-      continue;
-    }
-
-    try {
-      await prepareReply(replyPage, aiReply, reply.id);
-      const success = await clickReply(replyPage, reply.authorHandle);
-      if (success) {
-        addReplyNode(threadData.rootTweetId, {
-          replyId: `echo-${Date.now()}`,
-          authorHandle: echoHandle,
-          text: aiReply,
-          parentReplyId: reply.id,
-          depth: reply.depth + 1,
-          createdAt: Date.now(),
-          isByMe: true,
-        });
-        repliesPosted++;
-        console.log(`  ✅ Replied to ${reply.authorHandle}: "${aiReply}"`);
-      } else {
-        console.log(`  ❌ Failed to post reply to ${reply.authorHandle}`);
-      }
-    } catch (err) {
-      console.error(`  ❌ Error posting reply: ${err}`);
-    } finally {
-      await replyPage.close().catch(() => {});
-    }
-
-    // Human-like wait between replies
-    if (repliesPosted > 0 && considered < repliesToProcess.length) {
-      const waitTime = getNextWaitTime(repliesPosted);
-      console.log(`\n⏳ Waiting ${formatWaitTime(waitTime)} before next reply...`);
-      await new Promise(r => setTimeout(r, waitTime));
-    }
+    // Dispatcher disconnected for now — pace directly between replies again.
+    // The "myself" manual path inside handleReply() already paces itself
+    // right after posting, so this is only reached for the ChatGPT path.
+    if (outcome.tookChatGptPath) await pace();
   }
 
   // Summary

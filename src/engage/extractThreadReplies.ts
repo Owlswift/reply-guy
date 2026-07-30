@@ -81,41 +81,62 @@ export async function extractThreadReplies(
   console.log("[engage] Expanding 'Show more' links...");
   await expandShowMoreLinks(page);
 
-  // Scroll to load more replies — X loads replies lazily
-  console.log("[engage] Scrolling to load replies...");
-  await scrollToLoadReplies(page);
-
-  // Extract the root tweet info
-  const rootTweet = await extractRootTweet(page);
-  if (!rootTweet) {
+  // Locate the root tweet's own article BEFORE any scrolling. X virtualizes
+  // long reply lists — articles scrolled far enough out of view can get
+  // unmounted from the DOM entirely to save memory — so the root (and any
+  // replies near it) must be captured while still guaranteed present,
+  // not looked up again after scrolling has potentially pushed it out.
+  const rootArticle = await locateFocusedArticle(page, tweetId, extractedHandle);
+  if (!rootArticle) {
     console.error("[engage] Could not extract root tweet");
     return null;
   }
 
-  // Extract all reply articles
-  console.log("[engage] Extracting replies...");
-  const replies = await extractAllReplies(page, extractedHandle ?? rootTweet.handle);
+  const myHandle = extractedHandle || rootArticle.handle;
+
+  // Scroll to load more replies, capturing reply data after EVERY step
+  // rather than only once at the end — for the same virtualization reason:
+  // extracting only after scrolling finishes would silently lose any
+  // reply that scrolled out of the mounted window along the way, which is
+  // indistinguishable from "never found it" and no amount of scroll
+  // patience fixes it, since the problem isn't scrolling far enough, it's
+  // forgetting what was already seen.
+  console.log("[engage] Scrolling to load replies...");
+  const replies = await scrollAndCaptureReplies(page, tweetId, myHandle);
 
   console.log(`[engage] Found ${replies.length} replies in the thread`);
 
   return {
     rootTweetId: tweetId,
     rootTweetUrl: tweetUrl,
-    rootTweetAuthor: rootTweet.author,
-    rootTweetHandle: rootTweet.handle,
-    rootTweetText: rootTweet.text,
+    rootTweetAuthor: rootArticle.author,
+    rootTweetHandle: rootArticle.handle,
+    rootTweetText: rootArticle.text,
     replies,
   };
 }
 
 /**
- * Expand all "Show more" / "Show replies" buttons on the page.
+ * Expand all "Show more" / "Show replies" / "Show additional replies"
+ * buttons currently visible on the page.
  *
- * Scoped to spans inside <article> (tweet) elements only — X's right-hand
- * "Trends for you" sidebar widget has its own "Show more" link that
- * navigates to /explore/tabs/for-you, and an unscoped page-wide search
- * matches that just as readily as a tweet's own truncated-text expander,
- * silently hijacking the scan tab off the thread entirely.
+ * Called repeatedly — once up front AND again after every scroll (see
+ * scrollAndCaptureReplies) — because these prompts frequently only render once
+ * you've scrolled far enough for that part of the thread to mount; running
+ * this once at the very top misses every one of them that appears further
+ * down, silently leaving whole reply sub-threads collapsed and invisible
+ * to extraction.
+ *
+ * The per-tweet expanders ("Show more", "Show replies", "Show this
+ * thread") are scoped to spans inside <article> (tweet) elements only —
+ * X's right-hand "Trends for you" sidebar widget has its own "Show more"
+ * link that navigates to /explore/tabs/for-you, and an unscoped page-wide
+ * search matches that just as readily, silently hijacking the scan tab off
+ * the thread entirely. "Show additional replies" (X's gate for
+ * likely-spam/low-quality/filtered replies) is a page-level prompt, not
+ * part of any single tweet's article, so it's matched unscoped instead —
+ * safe because its wording is distinctive enough not to collide with
+ * anything else on the page.
  */
 async function expandShowMoreLinks(page: Page): Promise<void> {
   let expanded = 0;
@@ -150,6 +171,18 @@ async function expandShowMoreLinks(page: Page): Promise<void> {
         continue;
       }
 
+      // Look for "Show additional replies" / "Show probable spam" gates —
+      // X's own wording for replies filtered out of the default view.
+      // Unscoped (not "article span") since this prompt isn't part of any
+      // tweet's own article.
+      const showAdditional = page.locator("span, div").filter({ hasText: /show (additional replies|more replies|probable spam)/i }).first();
+      if (await showAdditional.isVisible().catch(() => false)) {
+        await showAdditional.click();
+        await page.waitForTimeout(randomDelayMs(500, 1000));
+        expanded++;
+        continue;
+      }
+
       // No more expandable links
       break;
     } catch {
@@ -163,27 +196,60 @@ async function expandShowMoreLinks(page: Page): Promise<void> {
 }
 
 /**
- * Scroll down to trigger X's lazy-loading of replies.
- * X loads replies in batches as you scroll.
+ * Scroll down to trigger X's lazy-loading of replies, extracting whatever
+ * reply articles are currently mounted after EVERY scroll step and merging
+ * them (deduped by id) into a running accumulator — not just once at the
+ * very end. X virtualizes long reply lists, unmounting articles once
+ * they've scrolled far enough out of view; extracting only at the end
+ * would silently lose anything unmounted along the way, indistinguishable
+ * from "there was nothing there" and unfixable by scrolling further/more
+ * patiently, since the content WAS seen, just not remembered.
+ *
+ * Skips whatever article matches `rootTweetId` at each pass — the root
+ * itself isn't a reply, and its DOM position can vary (see
+ * locateFocusedArticle).
  */
-async function scrollToLoadReplies(page: Page): Promise<void> {
-  const maxScrolls = 15;
-  let previousCount = 0;
+async function scrollAndCaptureReplies(
+  page: Page,
+  rootTweetId: string,
+  myHandle: string
+): Promise<ExtractedReply[]> {
+  const repliesById = new Map<string, ExtractedReply>();
+
+  const captureVisible = async (): Promise<number> => {
+    const articles = await page.locator("article").all();
+    let newlyCaptured = 0;
+
+    for (const article of articles) {
+      const permalinkId = await getArticlePermalinkId(article);
+      if (!permalinkId || permalinkId === rootTweetId) continue;
+      if (repliesById.has(permalinkId)) continue;
+
+      try {
+        const reply = await extractSingleReply(article, myHandle);
+        if (reply) {
+          repliesById.set(reply.id, reply);
+          newlyCaptured++;
+        }
+      } catch {
+        // Skip articles we can't parse
+      }
+    }
+
+    return newlyCaptured;
+  };
+
+  // Capture whatever's already mounted before any scrolling.
+  await captureVisible();
+
+  const maxScrolls = 25;
   let noNewRepliesCount = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
-    // Count current articles
-    const currentCount = await page.locator("article").count();
-
-    if (currentCount === previousCount) {
-      noNewRepliesCount++;
-      // If we've scrolled 3 times with no new articles, we're done
-      if (noNewRepliesCount >= 3) break;
-    } else {
-      noNewRepliesCount = 0;
-    }
-
-    previousCount = currentCount;
+    // Re-check for "show more"/"show replies"/"show additional replies"
+    // prompts before scrolling further — these often only render once this
+    // part of the thread has scrolled into view, not just at the very top.
+    await expandShowMoreLinks(page);
 
     // Scroll down
     await page.evaluate(() => {
@@ -191,32 +257,79 @@ async function scrollToLoadReplies(page: Page): Promise<void> {
       window.scrollBy(0, 800);
     });
 
-    await page.waitForTimeout(randomDelayMs(500, 1200));
+    await page.waitForTimeout(randomDelayMs(600, 1400));
+
+    const newlyCaptured = await captureVisible();
+
+    if (newlyCaptured === 0) {
+      noNewRepliesCount++;
+      // Give lazy-loading more chances before concluding we're done —
+      // slower-loading batches can otherwise get mistaken for the end of
+      // the thread.
+      if (noNewRepliesCount >= 4) break;
+    } else {
+      noNewRepliesCount = 0;
+    }
   }
 
-  console.log(`[engage] Scrolled ${maxScrolls - noNewRepliesCount} times, found ${previousCount} total articles`);
+  // Final pass in case content settled after the last scroll.
+  await expandShowMoreLinks(page);
+  await captureVisible();
+
+  console.log(`[engage] Scrolled up to ${maxScrolls} times, captured ${repliesById.size} distinct replies`);
+
+  return buildReplyTree(Array.from(repliesById.values()));
 }
 
 /**
- * Extract the root tweet's author and text from the page.
+ * Get the permalink status id rendered inside a given article, if any.
+ * Shared by root-tweet lookup, reply extraction, and permalink-context
+ * lookup so "which tweet is this article actually" is answered the same
+ * way everywhere.
+ *
+ * Must be the tweet's OWN permalink, not just any status link inside the
+ * article — an article can contain several: a quoted tweet's link, a
+ * "Show this thread" / conversation-root link, a "Replying to" link, in
+ * addition to the tweet's own. `querySelector('a[href*="/status/"]')`
+ * returns whichever of those happens to come first in the DOM, which is
+ * NOT reliably the tweet's own id — X always wraps the tweet's own
+ * timestamp ("2h", "Jul 28") in a link to its own permalink, so anchoring
+ * on that specific link is the unambiguous way to get this article's own id.
  */
-async function extractRootTweet(
-  page: Page
+async function getArticlePermalinkId(
+  article: ReturnType<Page["locator"]>
+): Promise<string | null> {
+  return article.evaluate((el) => {
+    const timeEl = el.querySelector("time");
+    const ownLink = timeEl?.closest('a[href*="/status/"]');
+    const link = ownLink ?? el.querySelector('a[href*="/status/"]');
+    if (!link) return null;
+    const href = link.getAttribute("href");
+    const match = href?.match(/status\/(\d+)/);
+    return match ? match[1] : null;
+  }).catch(() => null);
+}
+
+/**
+ * Extract just the author (handle + display name) and text of an article —
+ * no timestamp/permalink/reply-tree bookkeeping, unlike extractSingleReply.
+ */
+async function extractArticleAuthorAndText(
+  article: ReturnType<Page["locator"]>
 ): Promise<{ author: string; handle: string; text: string } | null> {
   try {
-    // The first article on a tweet permalink page is usually the root tweet
-    const firstArticle = page.locator("article").first();
-
-    const authorText = await firstArticle
+    const authorText = await article
       .locator('[data-testid="User-Name"]')
       .first()
       .textContent({ timeout: 5000 });
 
-    const handle = authorText?.match(/@(\w+)/)?.[0] ?? "";
-    const author = (authorText?.split("@")[0] ?? "").trim();
+    if (!authorText) return null;
+
+    const handle = authorText.match(/@(\w+)/)?.[0] ?? "";
+    const author = (authorText.split("@")[0] ?? "").trim();
 
     const text =
-      (await firstArticle
+      (await article
         .locator('[data-testid="tweetText"]')
         .first()
         .textContent({ timeout: 5000 }))?.trim() ?? "";
@@ -228,40 +341,168 @@ async function extractRootTweet(
 }
 
 /**
- * Extract all reply articles from the page.
+ * Locate the article for a specific tweet on its own permalink page — the
+ * one matching `targetTweetId`, whatever its position — and return both
+ * its DOM index and its extracted author/text.
  *
- * We identify replies by looking at articles that are NOT the root tweet.
- * Each reply article has:
- *   - A User-Name element (author)
- *   - A tweetText element (content)
- *   - A time element (timestamp)
- *   - A reply button (data-testid="reply")
+ * Two strategies, because neither alone is reliable:
+ *
+ * 1. Exact id match via the tweet's own timestamp-permalink link
+ *    (getArticlePermalinkId). This fails for exactly the article we need
+ *    most often: X does not link the FOCUSED tweet's own timestamp back to
+ *    itself (there's nowhere useful to navigate from its own page) — it
+ *    renders the full date/view-count instead, with no wrapping <a>. Every
+ *    ancestor and every reply DOES get that self-link, so this strategy
+ *    reliably finds everything EXCEPT the one tweet that IS the page.
+ *
+ * 2. Fall back to `authorHandle` (parsed from the URL, e.g. the account
+ *    that owns this permalink): find the LAST article in the leading run
+ *    authored by that handle. This covers both a standalone tweet (article
+ *    0) and the tail of that author's own self-thread (several consecutive
+ *    self-authored articles), while correctly skipping any ancestor
+ *    tweet(s) by OTHER accounts that X renders above it when this tweet is
+ *    itself a reply to someone else.
+ *
+ * Falls back to article 0 only if both strategies fail outright.
  */
-async function extractAllReplies(
+async function locateFocusedArticle(
   page: Page,
-  myHandle: string
-): Promise<ExtractedReply[]> {
+  targetTweetId: string,
+  authorHandle: string
+): Promise<{ index: number; author: string; handle: string; text: string } | null> {
   const articles = await page.locator("article").all();
-  const replies: ExtractedReply[] = [];
 
-  // Skip the first article (root tweet), process the rest
-  for (let i = 1; i < articles.length; i++) {
+  for (let i = 0; i < articles.length; i++) {
     const article = articles[i];
     if (!article) continue;
+    const permalinkId = await getArticlePermalinkId(article);
+    if (permalinkId !== targetTweetId) continue;
 
-    try {
-      const reply = await extractSingleReply(article, myHandle);
-      if (reply) {
-        replies.push(reply);
-      }
-    } catch {
-      // Skip articles we can't parse
-    }
+    const extracted = await extractArticleAuthorAndText(article);
+    if (extracted) return { index: i, ...extracted };
   }
 
-  // Build parent-child relationships by analyzing reply structure
-  // X renders replies in DOM order, but we need to figure out the tree
-  return buildReplyTree(replies);
+  if (authorHandle) {
+    const normalized = authorHandle.replace(/^@/, "").toLowerCase();
+    let bestIndex = -1;
+    let bestInfo: { author: string; handle: string; text: string } | null = null;
+    let sawMatch = false;
+
+    for (let i = 0; i < articles.length; i++) {
+      const article = articles[i];
+      if (!article) continue;
+      const info = await extractArticleAuthorAndText(article);
+      const isMatch = (info?.handle ?? "").replace(/^@/, "").toLowerCase() === normalized;
+
+      if (isMatch) {
+        bestIndex = i;
+        bestInfo = info;
+        sawMatch = true;
+        continue;
+      }
+      // Stop extending once we hit a different author AFTER already
+      // matching at least once — that's the boundary between the leading
+      // self-authored run and whatever comes after it (replies, or an
+      // unrelated ancestor if the match never happened).
+      if (sawMatch) break;
+    }
+
+    if (bestInfo) return { index: bestIndex, ...bestInfo };
+  }
+
+  // Last resort: neither strategy found anything — assume the first
+  // article rather than failing the whole scan outright.
+  const firstArticle = page.locator("article").first();
+  const extracted = await extractArticleAuthorAndText(firstArticle);
+  return extracted ? { index: 0, ...extracted } : null;
+}
+
+/**
+ * Navigate-and-extract the verified context for a single reply: its own
+ * text plus the tweet/comment immediately ABOVE it in the ancestor chain —
+ * i.e. what it is actually replying to. This is X's own rendering of the
+ * thread (ancestors first, then the focused tweet matching the URL, then
+ * its descendants), which is unambiguous — unlike buildReplyTree's
+ * DOM-order-plus-@mention heuristic over the flat root-tweet scan, which
+ * can misattribute parentage in nested or out-of-order threads.
+ *
+ * Assumes `page` is already navigated to the reply's own permalink URL
+ * (https://x.com/{handle}/status/{replyId}) and has an <article> loaded.
+ */
+export async function extractReplyPermalinkContext(
+  page: Page,
+  replyId: string,
+  replyAuthorHandle: string,
+  echoHandle?: string
+): Promise<{
+  replyAuthor: string;
+  replyText: string;
+  parentAuthor: string;
+  parentText: string;
+  parentId: string;
+  hasParent: boolean;
+  alreadyRepliedByMe: boolean;
+} | null> {
+  try {
+    // Expand any truncated "Show more" tweet text BEFORE reading anything —
+    // extractThreadReplies() (the full-thread scan) already does this, but
+    // this function reads the root tweet's and the comment's own text
+    // straight off the DOM with no expansion step, so a long original tweet
+    // or a long comment silently got fed to the reply-generation prompt as
+    // a truncated preview instead of its full text.
+    await expandShowMoreLinks(page);
+
+    const focused = await locateFocusedArticle(page, replyId, replyAuthorHandle);
+    if (!focused) return null;
+
+    const articles = await page.locator("article").all();
+
+    let parent: { author: string; handle: string; text: string } | null = null;
+    let parentId = "";
+    if (focused.index > 0) {
+      const parentArticle = articles[focused.index - 1];
+      if (parentArticle) {
+        parent = await extractArticleAuthorAndText(parentArticle);
+        parentId = (await getArticlePermalinkId(parentArticle)) ?? "";
+      }
+    }
+
+    // Has Echo (or the operator, manually) already replied to THIS specific
+    // comment? Only articles AFTER the focused one are actual replies TO
+    // it. Checking "any article on this page authored by Echo" (as opposed
+    // to specifically the ones after the focused index) would always be
+    // true and never detect anything real: the ancestor immediately above
+    // the focused article (read as `parent` above) is guaranteed to be
+    // Echo's own post/reply — that's what made this a candidate reply in
+    // the first place — and X also renders the "Replying to @echoHandle"
+    // indicator as part of the focused article's own text, which contains
+    // a link to Echo's profile regardless of whether Echo ever answered it.
+    let alreadyRepliedByMe = false;
+    if (echoHandle) {
+      const normalizedEcho = echoHandle.replace(/^@/, "").toLowerCase();
+      for (let i = focused.index + 1; i < articles.length; i++) {
+        const descendant = articles[i];
+        if (!descendant) continue;
+        const info = await extractArticleAuthorAndText(descendant);
+        if ((info?.handle ?? "").replace(/^@/, "").toLowerCase() === normalizedEcho) {
+          alreadyRepliedByMe = true;
+          break;
+        }
+      }
+    }
+
+    return {
+      replyAuthor: focused.handle,
+      replyText: focused.text,
+      parentAuthor: parent?.handle ?? "",
+      parentText: parent?.text ?? "",
+      parentId,
+      hasParent: parent !== null,
+      alreadyRepliedByMe,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -303,13 +544,7 @@ async function extractSingleReply(
   const createdAt = datetime ? new Date(datetime).getTime() : Date.now();
 
   // Get the tweet's permalink id from the article
-  const permalinkId = await article.evaluate((el) => {
-    const link = el.querySelector('a[href*="/status/"]');
-    if (!link) return null;
-    const href = link.getAttribute("href");
-    const match = href?.match(/status\/(\d+)/);
-    return match ? match[1] : null;
-  }).catch(() => null);
+  const permalinkId = await getArticlePermalinkId(article);
 
   if (!permalinkId) return null;
 

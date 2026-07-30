@@ -172,6 +172,22 @@ export function hasRepliedToReply(
 }
 
 /**
+ * Same check as hasRepliedToReply, but across every tracked conversation —
+ * for callers that discover a reply id (e.g. scanning notifications) before
+ * they know which of Echo's posts it's actually a reply to, and so can't
+ * name a rootTweetId to look under yet.
+ */
+export function hasRepliedToReplyAnywhere(replyId: string): boolean {
+  const conversations = load();
+  for (const state of conversations.values()) {
+    if (state.replies.some((n) => n.isByMe && n.parentReplyId === replyId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Determine if Echo should continue the conversation, given the tree.
  *
  * Rules:

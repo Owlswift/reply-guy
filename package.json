@@ -9,7 +9,10 @@
     "start:runner": "tsx src/runner.ts",
     "start:interactive": "tsx src/main-interactive.ts",
     "start:interactive:watch": "bash scripts/watch-and-restart.sh",
+    "dispatcher": "tsx src/dispatcher.ts",
+    "dispatcher:watch": "bash scripts/watch-and-restart-dispatcher.sh",
     "catchup:priority": "tsx src/catchupPriorityHandles.ts",
+    "catchup:stories": "tsx src/catchupStoryTellers.ts",
     "ensure-running": "bash scripts/ensure-running.sh",
     "setup": "bash scripts/setup.sh",
     "build": "tsc",
@@ -24,7 +27,11 @@
     "test:scraper": "tsx src/scraper/test.ts",
     "test:twitter": "tsx src/twitter/test.ts",
     "test:twitter-mentions": "tsx src/twitter/test-mentions.ts",
-    "engage": "tsx src/cli/engage.ts"
+    "engage": "tsx src/cli/engage.ts",
+    "notifications": "tsx src/cli/notifications.ts",
+    "reply-stats": "tsx src/cli/replyStats.ts",
+    "stop:cron": "launchctl unload ~/Library/LaunchAgents/com.echo.ensure-running.plist",
+    "start:cron": "launchctl load ~/Library/LaunchAgents/com.echo.ensure-running.plist"
   },
   "keywords": [],
   "author": "",

@@ -113,22 +113,31 @@ interface ScanOptions {
  * Scrolls progressively while scanning — the timeline is virtualized, so
  * articles beyond what's initially mounted only appear as you scroll.
  */
+/**
+ * Invoked once per qualifying original post, in scan order (newest-first),
+ * the moment it's found — awaited before the scroll continues. This is
+ * what lets a caller open and fully handle each post immediately instead
+ * of collecting a batch and processing it afterward (see
+ * scanProfileWithinWindow).
+ */
+type OnOriginalPost = (post: ProfileOriginalTweet) => Promise<void>;
+
 async function scanProfile(
   page: Page,
   handle: string,
-  options: ScanOptions
-): Promise<{ found: ProfileOriginalTweet[]; newestTweetId: string | null }> {
+  options: ScanOptions,
+  onOriginalPost: OnOriginalPost
+): Promise<{ newestTweetId: string | null }> {
   await page.goto(`https://x.com/${handle}`, { waitUntil: "domcontentloaded" });
 
   try {
     await page.waitForSelector("article", { timeout: 10_000 });
   } catch {
     // Empty/suspended/rate-limited profile — nothing to do this cycle.
-    return { found: [], newestTweetId: null };
+    return { newestTweetId: null };
   }
   await page.waitForTimeout(1500);
 
-  const found: ProfileOriginalTweet[] = [];
   const seenIds = new Set<string>();
   let newestTweetId: string | null = null;
   let scannedCount = 0;
@@ -174,7 +183,7 @@ async function scanProfile(
           (!info.datetime || Date.now() - new Date(info.datetime).getTime() > options.maxAgeMs);
 
         if (!pinnedTooOld) {
-          found.push({
+          await onOriginalPost({
             id: info.id,
             url: info.href.startsWith("http") ? info.href : `https://x.com${info.href.split("?")[0]}`,
             text: info.text,
@@ -198,7 +207,7 @@ async function scanProfile(
     await page.waitForTimeout(700);
   }
 
-  return { found, newestTweetId };
+  return { newestTweetId };
 }
 
 /**
@@ -212,35 +221,43 @@ export async function visitProfileForNewOriginals(
   lastSeenTweetId: string | null
 ): Promise<ProfileVisitResult> {
   const handle = username.replace(/^@/, "");
-  const { found, newestTweetId } = await scanProfile(page, handle, {
-    maxArticles: MAX_ARTICLES_TO_SCAN,
-    maxAgeMs: MAX_AGE_MS,
-    stopAtId: lastSeenTweetId,
-  });
+  const found: ProfileOriginalTweet[] = [];
+  const { newestTweetId } = await scanProfile(
+    page,
+    handle,
+    { maxArticles: MAX_ARTICLES_TO_SCAN, maxAgeMs: MAX_AGE_MS, stopAtId: lastSeenTweetId },
+    async (post) => { found.push(post); }
+  );
   // found is newest-first (scan order); reverse so callers enqueue in the
   // order the tweets were actually posted.
   return { newOriginals: found.reverse(), newestTweetId };
 }
 
 /**
- * Collect every original post from a profile within maxAgeMs, regardless
- * of any previously-seen cursor — the "catch up on anything in this
- * window" use case (manual catch-up command). Callers are expected to
- * de-duplicate against already-replied tweets themselves (e.g. via
- * hasReplied()), since this returns everything in the window, not just
- * what's new.
+ * Scan a profile's Posts tab for every original post within maxAgeMs,
+ * regardless of any previously-seen cursor, calling `onOriginalPost`
+ * immediately as each one is found (streaming) rather than collecting a
+ * batch and returning it — the "catch up on anything in this window" use
+ * case (manual catch-up command).
+ *
+ * Streaming instead of collect-then-process isn't just pacing: it removes
+ * the need to assume "the root of this thread is either elsewhere in the
+ * same batch, or was already handled earlier" — an assumption that broke
+ * in practice when a thread's root fell just outside maxAgeMs while a
+ * later continuation (posted when the author came back to add more)
+ * stayed inside it. The root was then never in the batch at all, and every
+ * continuation's "root handles this instead" redirect pointed at a tweet
+ * that would never be opened. Callers should instead check
+ * TweetDetails.isRoot themselves per post and simply ignore any post that
+ * isn't its own thread's root, rather than trying to chase/redirect to one.
  */
 export async function scanProfileWithinWindow(
   page: Page,
   username: string,
   maxAgeMs: number,
+  onOriginalPost: OnOriginalPost,
   maxArticles: number = MAX_ARTICLES_TO_SCAN
-): Promise<ProfileOriginalTweet[]> {
+): Promise<void> {
   const handle = username.replace(/^@/, "");
-  const { found } = await scanProfile(page, handle, {
-    maxArticles,
-    maxAgeMs,
-    stopAtId: null,
-  });
-  return found.reverse();
+  await scanProfile(page, handle, { maxArticles, maxAgeMs, stopAtId: null }, onOriginalPost);
 }

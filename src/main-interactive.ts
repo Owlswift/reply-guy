@@ -11,17 +11,19 @@ import { getRepliedReason, isPermanentlySkipped } from "./storage/repliedTweets"
 import { hasUrlBeenReplied, markUrlReplied } from "./storage/repliedUrls";
 import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
 import { flagPostForReview } from "./storage/flaggedPosts";
+// recordStoryTeller import removed — no longer adding new story teller handles to Redis
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
 import { findBlockedContentWord } from "./decision/blockedContentWords";
 import { isHeavyPidgin } from "./decision/pidginDetection";
 import { isQuoteBaitTweet } from "./decision/quoteBaitDetection";
-import { recordReplyForHour, getCurrentHourReplyCount } from "./storage/hourlyReplyStats";
 import { deferLowPriorityTweet, getDeferredLowPriorityTweets, clearLowPriorityTweet } from "./storage/lowPriorityTweets";
 import { runPriorityHandleWorker } from "./workers/priorityHandleWorker";
 import { createNavigator, BrowserNavigator } from "./browser/BrowserNavigator";
 import { extractCurrentTweet, TweetDetails } from "./browser/extractTweet";
 import { markReplied } from "./storage/repliedTweets";
+// Dispatcher wiring — disconnected for now, scripts post directly/independently again.
+// import { enqueueReplyJob } from "./storage/replyQueue";
 import { markNotificationReplied } from "./storage/seenNotifications";
 import { setScrollY } from "./timeline/state";
 import { stats } from "./stats/runtime";
@@ -48,9 +50,9 @@ import {
   getThinkingTime,
   getPostReplyPause,
   maybeInterruption,
-  getReplyRatio,
   setSpeedMultiplier,
 } from "./behavior/scheduler";
+import { replyProbabilityFor } from "./decision/replyProbability";
 
 const DAILY_LIMIT = 300;
 
@@ -315,7 +317,6 @@ async function finalizeManualReply(
   markReplied(item.id, "posted a manual reply");
   markNotificationReplied(item.id);
   stats.posted++;
-  await recordReplyForHour().catch(() => {});
   await markUrlReplied(item.url).catch(() => {});
   try {
     const { MemoryRepository } = await import("./database/MemoryRepository");
@@ -513,7 +514,6 @@ async function main() {
       console.log();
 
       // Enqueue notifications — apply reply ratio
-      const replyRatio = getReplyRatio();
       logTableHeader();
       for (const tweet of tweets) {
         // Skip if already replied — isPermanentlySkipped, not hasReplied,
@@ -683,14 +683,20 @@ async function main() {
         // Random reply-ratio throttle — skipped for urgent/top-priority
         // (isUrgent already covers isTopPriority) and plain priority
         // handles, since these should always get a reply, never a
-        // random pass-through.
+        // random pass-through. Category-aware (decision/replyProbability.ts)
+        // rather than a single flat ratio for every tweet — a real account's
+        // odds of commenting vary a lot by what kind of post it is (a direct
+        // question vs. a vague meme), classifyTweet() is already cheap
+        // (regex-only, no model call) so there's no cost to calling it here.
         const isPriorityHandle =
           isUrgent(tweet.author, tweet.username) || isPriority(tweet.author, tweet.username);
-        if (!isPriorityHandle && Math.random() > replyRatio) {
+        const tweetCategory = classifyTweet(tweet.text);
+        const tweetReplyProbability = replyProbabilityFor(tweetCategory);
+        if (!isPriorityHandle && Math.random() > tweetReplyProbability) {
           // Deliberately NOT marked replied/seen anywhere — this is a random
           // per-cycle roll, not a permanent decision, so the same tweet is
           // free to be picked up (and re-rolled) again on a later cycle.
-          logTweetOutcome("SKIP", tweet.url, "random reply-ratio throttle this round, not remembered", tweet.author);
+          logTweetOutcome("SKIP", tweet.url, `random reply-ratio throttle this round (${tweetCategory}, ${Math.round(tweetReplyProbability * 100)}% odds), not remembered`, tweet.author);
           continue;
         }
 
@@ -882,6 +888,15 @@ async function main() {
             dequeue();
             continue;
           }
+
+          // Structural thread detection (extractTweet.ts's isThread: either
+          // this segment has an earlier same-author predecessor, or — the
+          // far more common case, since Echo almost always opens/replies to
+          // a thread's ROOT — the forward walk found later same-author
+          // segments merged into fullText). Recorded here, once, regardless
+          // of which direction found it or what happens to this tweet next.
+          // NOTE: recordStoryTeller was removed — no longer adding new
+          // story teller handles to Redis.
 
           // Safety net for the enqueue-time content check above — the
           // timeline preview can be truncated, so a blocked word only
@@ -1452,128 +1467,202 @@ async function main() {
           // before the item ever reached "ready").
           const autoLabel = "well-wish";
           log(`=== AUTO-POST ${autoLabel.toUpperCase()} ===`);
-          console.log(`\n🤖 Posting manual reply for ${autoLabel}: "${tweetText}"\n`);
+          console.log(`\n📤 Posting ${autoLabel} reply: "${tweetText}"\n`);
 
-          const { prepareReply, clickReply } = await import("./reply/reply");
-          const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
-
+          // Dispatcher disconnected for now — posts directly again instead of
+          // enqueueing. See the commented-out queued version below to
+          // re-enable src/dispatcher.ts routing.
           const autoDraft = item.draft;
-          // Tracked explicitly now — this used to call markReplied()
-          // unconditionally after this block regardless of whether
-          // clickReply() actually succeeded or threw, so a failed post
-          // (rate limit, UI change, network hiccup) still got marked
-          // "replied" with no way to tell the difference later.
-          let autoPostSucceeded = false;
+          let posted = false;
           if (autoDraft) {
-            try {
-              await prepareReply(page, autoDraft);
-              const success = await clickReply(page, details.handle || item.author);
-              autoPostSucceeded = success;
-              if (success) {
-                try {
-                  await memoryRepo.saveMemory({
-                    id: "",
-                    tweetId: item.id,
-                    tweetText,
-                    authorHandle: details.handle || item.author,
-                    relationship: item.relationship || "stranger",
-                    aiDraft: `manual-${autoLabel}`,
-                    finalReply: autoDraft,
-                    wasEdited: false,
-                    approved: true,
-                    createdAt: new Date()
-                  });
-                  console.log(`🧠 Saved ${autoLabel} to memory.\n`);
-                } catch {}
-              }
-            } catch (err) {
-              console.error(`Failed to auto-post ${autoLabel}:`, err);
-            }
+            const { prepareReply, clickReply } = await import("./reply/reply");
+            await prepareReply(page, autoDraft, item.id);
+            posted = await clickReply(page, details.handle || item.author);
           }
 
-          markReplied(item.id, autoPostSucceeded
+          markReplied(item.id, posted
             ? `posted a ${autoLabel} reply`
-            : `attempted to auto-post a ${autoLabel} reply but it did not succeed (see console for error)`);
+            : `attempted to post a ${autoLabel} reply but it did not succeed`);
           markNotificationReplied(item.id);
           dequeue();
-          if (autoPostSucceeded) {
+          if (posted) {
             stats.posted++;
-            await recordReplyForHour().catch(() => {});
             await markUrlReplied(item.url).catch(() => {});
+            try {
+              const { MemoryRepository } = await import("./database/MemoryRepository");
+              const memoryRepo = new MemoryRepository();
+              await memoryRepo.saveMemory({
+                id: "",
+                tweetId: item.id,
+                tweetText,
+                authorHandle: details.handle || item.author,
+                relationship: item.relationship || "stranger",
+                aiDraft: `manual-${autoLabel}`,
+                finalReply: autoDraft || "",
+                wasEdited: false,
+                approved: true,
+                createdAt: new Date(),
+              });
+            } catch {}
           }
 
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
-          const hourCount = await getCurrentHourReplyCount().catch(() => null);
-          if (autoPostSucceeded) {
-            console.log(`\n✅ ${autoLabel} reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)${hourCount !== null ? ` — ${hourCount} this hour` : ""}\n`);
+          if (posted) {
+            console.log(`\n✅ ${autoLabel} reply posted! Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
           } else {
-            console.log(chalk.red(`\n❌ ${autoLabel} reply post FAILED for ${item.id} — marked handled but nothing was actually posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
+            console.log(chalk.red(`\n❌ Failed to post ${autoLabel} reply for ${item.id}. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
           }
+
+          // === DISPATCHER-QUEUED VERSION (disconnected for now) ===
+          // const autoDraft = item.draft;
+          // let queued = false;
+          // if (autoDraft) {
+          //   try {
+          //     await enqueueReplyJob({
+          //       source: "interactive",
+          //       priority: 2,
+          //       tweetUrl: item.url,
+          //       tweetId: item.id,
+          //       authorHandle: details.handle || item.author,
+          //       replyText: autoDraft,
+          //       onPosted: {
+          //         type: "main_interactive",
+          //         itemId: item.id,
+          //         url: item.url,
+          //         reason: `posted a ${autoLabel} reply`,
+          //         memory: {
+          //           tweetId: item.id,
+          //           tweetText,
+          //           authorHandle: details.handle || item.author,
+          //           relationship: item.relationship || "stranger",
+          //           aiDraft: `manual-${autoLabel}`,
+          //           finalReply: autoDraft,
+          //         },
+          //       },
+          //     });
+          //     queued = true;
+          //   } catch (err) {
+          //     console.error(`Failed to queue ${autoLabel} reply:`, err);
+          //   }
+          // }
+          //
+          // markReplied(item.id, queued
+          //   ? `queued a ${autoLabel} reply for posting`
+          //   : `attempted to queue a ${autoLabel} reply but it did not succeed (see console for error)`);
+          // markNotificationReplied(item.id);
+          // dequeue();
+          // if (queued) {
+          //   stats.posted++;
+          // }
+          //
+          // const progress = getNotificationProgress();
+          // const remaining = progress.total - progress.replied;
+          // if (queued) {
+          //   console.log(`\n📥 ${autoLabel} reply queued for posting. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
+          // } else {
+          //   console.log(chalk.red(`\n❌ Failed to queue ${autoLabel} reply for ${item.id}. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
+          // }
         } else {
           // ============================================================
           // PHASE 4b: AUTO-POST (AI draft)
           // ============================================================
           const providerLabel = aiProviderLabel(aiProvider);
           log(`=== AUTO-POST (${providerLabel}) ===`);
-          console.log(`\n${chalk.green(`🤖 ${providerLabel} draft for @` + (details.handle || item.author).replace(/^@/, ""))}:\n`);
+          console.log(`\n${chalk.green(`📥 ${providerLabel} draft for @` + (details.handle || item.author).replace(/^@/, ""))}:\n`);
           console.log(chalk.yellow(`   ┌─ Tweet ─────────────────────────────────────`));
           console.log(chalk.yellow(`   │ ${tweetText}`));
           console.log(chalk.green(`   ├─ Draft ─────────────────────────────────────`));
           console.log(chalk.green(`   │ ${item.draft}`));
           console.log(chalk.green(`   └─────────────────────────────────────────────\n`));
 
+          // Dispatcher disconnected for now — posts directly again instead of
+          // enqueueing. See the commented-out queued version below to
+          // re-enable src/dispatcher.ts routing.
           const { prepareReply, clickReply } = await import("./reply/reply");
-          const memoryRepo = new (await import("./database/MemoryRepository")).MemoryRepository();
+          await prepareReply(page, item.draft!, item.id);
+          const posted = await clickReply(page, details.handle || item.author);
 
-          // Tracked explicitly — see the well-wish branch above for why:
-          // this used to call markReplied() unconditionally regardless of
-          // whether clickReply() actually succeeded.
-          let aiPostSucceeded = false;
-          try {
-            await prepareReply(page, item.draft!);
-            const success = await clickReply(page, details.handle || item.author);
-            aiPostSucceeded = success;
-            if (success) {
-              try {
-                await memoryRepo.saveMemory({
-                  id: "",
-                  tweetId: item.id,
-                  tweetText,
-                  authorHandle: details.handle || item.author,
-                  relationship: item.relationship || "stranger",
-                  aiDraft: item.draft || "",
-                  finalReply: item.draft || "",
-                  wasEdited: false,
-                  approved: true,
-                  createdAt: new Date()
-                });
-                console.log(`🧠 Saved to memory.\n`);
-              } catch {}
-            }
-          } catch (err) {
-            console.error(`Failed to auto-post:`, err);
-          }
-
-          markReplied(item.id, aiPostSucceeded
+          markReplied(item.id, posted
             ? `posted a ${aiProviderLabel(aiProvider)} reply`
-            : `attempted to post a ${aiProviderLabel(aiProvider)} reply but it did not succeed (see console for error)`);
+            : `attempted to post a ${aiProviderLabel(aiProvider)} reply but it did not succeed`);
           markNotificationReplied(item.id);
           dequeue();
-          if (aiPostSucceeded) {
+          if (posted) {
             stats.posted++;
-            await recordReplyForHour().catch(() => {});
             await markUrlReplied(item.url).catch(() => {});
+            try {
+              const { MemoryRepository } = await import("./database/MemoryRepository");
+              const memoryRepo = new MemoryRepository();
+              await memoryRepo.saveMemory({
+                id: "",
+                tweetId: item.id,
+                tweetText,
+                authorHandle: details.handle || item.author,
+                relationship: item.relationship || "stranger",
+                aiDraft: item.draft || "",
+                finalReply: item.draft || "",
+                wasEdited: false,
+                approved: true,
+                createdAt: new Date(),
+              });
+            } catch {}
           }
 
           const progress = getNotificationProgress();
           const remaining = progress.total - progress.replied;
-          const hourCount = await getCurrentHourReplyCount().catch(() => null);
-          if (aiPostSucceeded) {
-            console.log(`\n✅ Reply posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)${hourCount !== null ? ` — ${hourCount} this hour` : ""}\n`);
+          if (posted) {
+            console.log(`\n✅ Reply posted! Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
           } else {
-            console.log(chalk.red(`\n❌ Reply post FAILED for ${item.id} — marked handled but nothing was actually posted. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
+            console.log(chalk.red(`\n❌ Failed to post reply for ${item.id}. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
           }
+
+          // === DISPATCHER-QUEUED VERSION (disconnected for now) ===
+          // let queued = false;
+          // try {
+          //   await enqueueReplyJob({
+          //     source: "interactive",
+          //     priority: 2,
+          //     tweetUrl: item.url,
+          //     tweetId: item.id,
+          //     authorHandle: details.handle || item.author,
+          //     replyText: item.draft!,
+          //     onPosted: {
+          //       type: "main_interactive",
+          //       itemId: item.id,
+          //       url: item.url,
+          //       reason: `posted a ${aiProviderLabel(aiProvider)} reply`,
+          //       memory: {
+          //         tweetId: item.id,
+          //         tweetText,
+          //         authorHandle: details.handle || item.author,
+          //         relationship: item.relationship || "stranger",
+          //         aiDraft: item.draft || "",
+          //         finalReply: item.draft || "",
+          //       },
+          //     },
+          //   });
+          //   queued = true;
+          // } catch (err) {
+          //   console.error(`Failed to queue reply:`, err);
+          // }
+          //
+          // markReplied(item.id, queued
+          //   ? `queued a ${aiProviderLabel(aiProvider)} reply for posting`
+          //   : `attempted to queue a ${aiProviderLabel(aiProvider)} reply but it did not succeed (see console for error)`);
+          // markNotificationReplied(item.id);
+          // dequeue();
+          // if (queued) {
+          //   stats.posted++;
+          // }
+          //
+          // const progress = getNotificationProgress();
+          // const remaining = progress.total - progress.replied;
+          // if (queued) {
+          //   console.log(`\n📥 Reply queued for posting. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`);
+          // } else {
+          //   console.log(chalk.red(`\n❌ Failed to queue reply for ${item.id}. Progress: ${progress.replied}/${progress.total} replied (${remaining} remaining)\n`));
+          // }
         }
 
         // ============================================================
@@ -1616,7 +1705,6 @@ async function main() {
           const freshTweets = await notificationSource.getTweets(page, navigator, true);
           if (freshTweets.length > 0) {
             markTweetActivity();
-            const replyRatio2 = getReplyRatio();
             logTableHeader();
             for (const ft of freshTweets) {
               if (isPermanentlySkipped(ft.id)) {
@@ -1661,8 +1749,10 @@ async function main() {
                 continue;
               }
               const ftIsPriorityHandle = isUrgent(ft.author, ft.username) || isPriority(ft.author, ft.username);
-              if (!ftIsPriorityHandle && Math.random() > replyRatio2) {
-                logTweetOutcome("SKIP", ft.url, "random reply-ratio throttle this round, not remembered", ft.author);
+              const ftCategory = classifyTweet(ft.text);
+              const ftReplyProbability = replyProbabilityFor(ftCategory);
+              if (!ftIsPriorityHandle && Math.random() > ftReplyProbability) {
+                logTweetOutcome("SKIP", ft.url, `random reply-ratio throttle this round (${ftCategory}, ${Math.round(ftReplyProbability * 100)}% odds), not remembered`, ft.author);
                 continue;
               }
               logTweetOutcome("QUEUE", ft.url, "enqueued", ft.author);

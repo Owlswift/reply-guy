@@ -21,6 +21,25 @@ const LINE_TARGET_REFLECTIVE_POLITICS_MIN = parseEnvInt("REPLY_LINE_MIN_REFLECTI
 const LINE_TARGET_REFLECTIVE_POLITICS_MAX = parseEnvInt("REPLY_LINE_MAX_REFLECTIVE_POLITICS", 3);
 const LINE_TARGET_DEFAULT_MIN = parseEnvInt("REPLY_LINE_MIN_DEFAULT", 1);
 const LINE_TARGET_DEFAULT_MAX = parseEnvInt("REPLY_LINE_MAX_DEFAULT", 2);
+// Story gets its own, wider range tied to the CATEGORY directly — not to
+// reflective mode. Only ~30% of story tweets roll "reflective"
+// (REPLY_MODE_WEIGHTS below), so gating the wider range on mode meant most
+// stories were getting squeezed into the same tight 1-2 default as
+// everything else, regardless of category.
+const LINE_TARGET_STORY_MIN = parseEnvInt("REPLY_LINE_MIN_STORY", 1);
+const LINE_TARGET_STORY_MAX = parseEnvInt("REPLY_LINE_MAX_STORY", 4);
+
+// Odds this specific reply is even permitted a common-typo swap (see
+// COMMON_TYPO_SWAPS below) — pre-rolled once per reply in JS rather than
+// left to the model's own sense of "occasionally," same reasoning as
+// lineTarget above: an instruction phrased as "sometimes" with no actual
+// randomization tends to cluster (always or never) instead of varying.
+function parseEnvFloat(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const parsed = raw !== undefined ? parseFloat(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+const TYPO_SWAP_PROBABILITY = parseEnvFloat("REPLY_TYPO_SWAP_PROBABILITY", 0.2);
 
 function randomInRange(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -344,7 +363,8 @@ CRITICAL RULES - NEVER VIOLATE THESE:
 - NEVER start with "The funny part is," "The painful part is," "The scary part is," "The crazy part is," "The best part is," "The worst part is," or any "The [adjective] part is" framing.
 - NEVER start with "Wild," "Wild that," "Wild how," or "That's wild" — "wild" is a generic, one-word-fits-any-tweet reaction, not an actual response to what THIS tweet said. If your first instinct is "wild," find the specific thing that's actually surprising and say that instead.
 - NEVER start with "The part that stands out is," "What stood out to me," "The hardest part would be," or "The fact that" — these are ANALYSIS-VOICE openers, not Twitter openers. They read like you're presenting a finding after studying the tweet, not reacting to it on first read. Compare: "The part that stands out is how quickly 'helping family' became an excuse" (analysis voice) vs. "Funny how 'helping family' only mattered once it benefited him" (a real reaction) — same observation, but only one sounds like a person typing on their phone. People on X react. They don't present findings. If your reply sounds like you stopped to explain why you think something, rewrite it as your first thought instead, not your conclusion after analyzing it.
-- NEVER answer a question the tweet didn't ask. If someone posts about needing help/funding/support for something, "What kind of [thing] are you looking to get into?" is an interview question, not a reaction — a person would just wish them well ("Hope someone comes through for you," "Wishing you luck with it") or say nothing at all, not request more details like a form.`;
+- NEVER answer a question the tweet didn't ask. If someone posts about needing help/funding/support for something, "What kind of [thing] are you looking to get into?" is an interview question, not a reaction — a person would just wish them well ("Hope someone comes through for you," "Wishing you luck with it") or say nothing at all, not request more details like a form.
+- NEVER open with a disclaimer, hedge, or caveat before getting to your actual point — this includes but isn't limited to disclaiming your own experience: "I can't honestly say this happened to me," "I can't say I've experienced this," "I can't speak from experience," "I haven't been through this myself," "I can't relate personally," "I can't pretend I've had something like this happen," or any other phrase whose job is to qualify or excuse the reaction that follows rather than just giving it. These are all the same move dressed differently — if your first clause exists only to soften, disclaim, or preface the real reply rather than being the reply itself, delete that clause and start with the actual reaction. Nobody reading a reply cares about the disclaimer — it's dead weight.`;
 
 // ─── Reply modes — explicit rotation instead of one implicit default ─────────
 // Most replies stay short (REPLY_PHILOSOPHY's default). But letting the
@@ -393,6 +413,21 @@ function pickRandomSubset<T>(pool: T[], count: number): T[] {
 }
 
 const SHORTHAND_POOL = ["ngl", "tbh", "lowkey", "highkey", "kinda", "rn", "fr", "ig", "sorta", "gonna", "wanna", "u", "ur", "af"];
+
+// Classic commonly-mistyped word pairs — real people mix these up
+// constantly typing fast on a phone. Deliberately NOT a general "misspell
+// things" instruction: an LLM asked to fake typos tends to either ignore it
+// or produce weird, unnatural-looking letter swaps that read as a glitch
+// rather than a real typo. This is a closed, predictable list instead —
+// [correct, commonly-typed-instead].
+const COMMON_TYPO_SWAPS: Array<[string, string]> = [
+  ["it's", "its"],
+  ["you're", "your"],
+  ["definitely", "definately"],
+  ["separate", "seperate"],
+  ["a lot", "alot"],
+  ["losing", "loosing"],
+];
 
 const DROPPED_SUBJECT_EXAMPLES: Array<[string, string]> = [
   // "kinda wild" used to be in this pool. It was showing up as a literal,
@@ -1337,10 +1372,13 @@ export function buildPersonalityPrompt(
   // the top of that range (3-4 lines) reply after reply instead of
   // actually varying. Pre-rolling a specific number and stating it as
   // THIS reply's target (not a re-usable rule) is what actually forces
-  // the variation. Reflective mode and politics get the wider range
-  // (env-configurable, default 1-3) since those are the two legitimate
-  // cases for more room; everything else stays tighter (default 1-2).
-  const lineTarget = (mode === "reflective" || isPolitics)
+  // the variation. Story gets its own wider range regardless of mode
+  // (env-configurable, default 1-4); reflective mode and politics get
+  // their own wider range too (default 1-3); everything else stays
+  // tighter (default 1-2).
+  const lineTarget = normalized === "story"
+    ? randomInRange(LINE_TARGET_STORY_MIN, LINE_TARGET_STORY_MAX)
+    : (mode === "reflective" || isPolitics)
     ? randomInRange(LINE_TARGET_REFLECTIVE_POLITICS_MIN, LINE_TARGET_REFLECTIVE_POLITICS_MAX)
     : randomInRange(LINE_TARGET_DEFAULT_MIN, LINE_TARGET_DEFAULT_MAX);
 
@@ -1359,6 +1397,14 @@ export function buildPersonalityPrompt(
   const shorthandRule = isPolitics
     ? `• Even in the more composed political register, keep it contraction-heavy and don't clean the grammar up into full sentences — "composed" means the ideas are more serious, not that the typing is more correct.`
     : `• Reach for actual texting shorthand where it fits the vibe of the specific reply — things like ${pickRandomSubset(SHORTHAND_POOL, 4).map(w => `"${w}"`).join(", ")} — instead of defaulting to the fully spelled-out formal version. That's a sample, not a fixed list — vary which one you reach for across replies, and most replies need none at all. Don't let any single one of these (especially "ngl") become your default go-to every time.`;
+
+  // Rolled once per reply (TYPO_SWAP_PROBABILITY, default 20%) rather than
+  // included every time — see COMMON_TYPO_SWAPS above for why this is a
+  // closed whitelist instead of an open "misspell sometimes" instruction.
+  const allowTypoSwap = Math.random() < TYPO_SWAP_PROBABILITY;
+  const typoSwapRule = allowTypoSwap
+    ? `• If (and only if) one of these words naturally belongs in your reply, you may use the commonly-mistyped version instead of the correct one, exactly once, the way someone typing fast on their phone would: ${COMMON_TYPO_SWAPS.map(([correct, typo]) => `"${correct}" → "${typo}"`).join(", ")}. Don't force one of these words in if it wouldn't otherwise be there, don't touch the spelling of anything else, and don't do more than one per reply.`
+    : "";
 
   // Append final guardrail — this is the LAST thing ChatGPT sees before writing.
   // Placing it here ensures every single prompt variant gets this reinforcement.
@@ -1379,13 +1425,16 @@ ${context && (context.quotedTweet || context.parentTweet || context.previousThre
 • Do NOT start with: "The funny part is", "The painful part is", "The scary part is", "The crazy part is", "The best part is", "The worst part is", or any "The [adjective] part is" framing.
 • Do NOT start with "Wild", "Wild that", "Wild how", or "That's wild" — it's a generic reaction that fits literally any tweet, which is exactly why it keeps showing up. Say what's actually surprising instead of naming the reaction to it.
 • Do NOT reach for a tech/software/gaming metaphor (patch notes, final boss, beta version, servers going offline, bugs, updates, respawning) unless the tweet is actually about tech, software, or gaming. Reframing an unrelated topic through a programmer/gamer lens to sound clever is an overused reflex, not real wit — check whether the tweet is actually tech-related before reaching for that kind of comparison.
+• Do NOT open with a disclaimer, hedge, or caveat before your actual point — e.g. "I can't say I've experienced this", "I can't pretend I've had something like this happen", "I haven't been through this myself" — or any other clause that only exists to qualify/excuse the reaction instead of just giving it. Delete that clause and start with the real reaction.
 • Do NOT claim you "ordered", "purchased", "bought", "subscribed", "followed", "signed up", "donated", "checked out", "sent a message", or took any action you did not actually take.
 • Your reply is an observation, not a transaction. Never invent actions.
 ${vocabularyRule}
 ${fillerWordsRule}
 ${looseGrammarRule}
 ${shorthandRule}
+${typoSwapRule}
 • Do NOT use em dashes (—) or double hyphens (--) to link or separate clauses. That punctuation habit is one of the most obvious "written by AI" tells and instantly gives away that this wasn't typed by a person. Use a comma, a period, or just start a new sentence instead.
+• Start your reply with a lowercase letter, never a capital, no matter what the first word normally is (including "I" — write it lowercase "i" if it starts the reply). Real people typing fast on their phone don't bother hitting shift for the first letter. This is enforced in code as a backstop, but write it lowercase yourself rather than relying on that.
 • No fancy or formal words: "authentic", "vibrant", "resonate", "elevate", "journey", "transformative", "meaningful", "impactful", "embrace", "leverage", "utilize", "facilitate", "demonstrate", "articulate", "notion", "narrative", "nuance", "fundamentally", "inherently", "essentially"${isPolitics ? " — even on politics, these read as corporate jargon, not \"composed,\" so they're still banned" : ""}.
 • No motivational phrases like "keep pushing", "you got this", "blessings", "manifesting".
 • Do NOT add an emoji just to soften, lighten, or punctuate a reply — especially not on a reflective, vulnerable, or emotionally honest tweet, where it undercuts the point instead of adding to it. Only use one if the tweet's own tone genuinely calls for it (it's already playful, already using emoji, etc.) — never as a default habit.
