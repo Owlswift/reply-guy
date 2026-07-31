@@ -40,28 +40,57 @@ export function shouldEndConversation(classification: ReplyClassification): bool
 }
 
 // Short closing acknowledgments — for replies that don't need or invite a
-// real back-and-forth (simple agreement like "facts"/"this", but also
-// praise, well-wishes, thank-yous, and other LIKE_ONLY-classified replies).
-// A brief word/emoji back reads as a normal, warm way to close out a
-// comment; posting nothing at all reads as ignoring them regardless of
-// which of those categories the reply falls into.
-const CLOSING_REACTIONS = [
+// real back-and-forth. Which pool fits depends on WHAT the reply actually
+// was, not just that it landed on LIKE_ONLY/END_CONVERSATION: "yeah
+// exactly" reads fine as agreement ("facts", "this") but makes no sense as
+// a response to praise or a well-wish — those need an actual thanks or a
+// reciprocal reply, not an agreement filler. Three pools instead of one
+// shared list so the reaction actually matches the reply it's closing out.
+
+// AGREEMENT (END_CONVERSATION) — someone just co-signing/restating the
+// original post. Also the fallback for classes with no dedicated pool
+// below (EMOJI_ONLY, JOKE) — a generic reaction fits those fine.
+const AGREEMENT_REACTIONS = [
   "facts",
   "exactly",
   "for sure",
-  "appreciate you",
   "same here",
   "🔥",
   "💯",
-  "🙏",
   "fr",
   "true that",
   "yea",
-  "yeah exactly",
 ];
 
-export function pickClosingReaction(): string {
-  return CLOSING_REACTIONS[Math.floor(Math.random() * CLOSING_REACTIONS.length)]!;
+// PRAISE / THANK_YOU — they complimented the post or thanked Echo for it.
+// The only thing that actually fits here is a genuine thanks.
+const APPRECIATION_REACTIONS = [
+  "thanks",
+  "thank you",
+  "appreciate you",
+  "appreciate that",
+  "means a lot",
+  "🙏",
+];
+
+// WELL_WISH / GREETINGS — "Happy Friday", "have a great one", "hey" — the
+// only natural response is to return it, not to agree with it.
+const RECIPROCAL_REACTIONS = [
+  "same to you",
+  "you too",
+  "right back at you",
+  "appreciate it, you too",
+  "same here, thanks",
+];
+
+export function pickClosingReaction(replyClass?: ReplyClass): string {
+  const pool =
+    replyClass === "PRAISE" || replyClass === "THANK_YOU"
+      ? APPRECIATION_REACTIONS
+      : replyClass === "WELL_WISH" || replyClass === "GREETINGS"
+      ? RECIPROCAL_REACTIONS
+      : AGREEMENT_REACTIONS;
+  return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
 /**
@@ -78,12 +107,13 @@ export async function postClosingReaction(params: {
   threadData: ThreadData;
   reply: ExtractedReply;
   echoHandle: string;
+  replyClass: ReplyClass;
   page?: Page;
 }): Promise<boolean> {
-  const { browserContext, threadData, reply, echoHandle } = params;
+  const { browserContext, threadData, reply, echoHandle, replyClass } = params;
   const replyPermalink = `https://x.com/${reply.authorHandle.replace(/^@/, "")}/status/${reply.id}`;
   const replyPage = params.page ?? await browserContext.newPage();
-  const reaction = pickClosingReaction();
+  const reaction = pickClosingReaction(replyClass);
 
   try {
     if (!params.page) {

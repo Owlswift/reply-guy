@@ -8,6 +8,11 @@ export interface TweetDetails {
   fullText: string;
   url: string;
   imageUrls: string[];
+  // Video or GIF attached to the anchor tweet — X renders both through the
+  // same [data-testid="videoPlayer"] component (a GIF is just a silent,
+  // auto-looping video under the hood), so one flag covers both rather than
+  // trying to tell them apart.
+  hasVideo: boolean;
   // Epoch ms of the most recently posted segment in the thread (the
   // anchor's own time if it's a single tweet). Lets callers tell a thread
   // that's still actively being posted apart from one that's settled.
@@ -365,6 +370,13 @@ export async function extractCurrentTweet(
     // No images — that's fine
   }
 
+  let hasVideo = false;
+  try {
+    hasVideo = (await anchorArticle.locator('[data-testid="videoPlayer"]').count()) > 0;
+  } catch {
+    // No video — that's fine
+  }
+
   // Same reply-count read as extractTweets.ts's timeline scraper, but here
   // for the anchor tweet on the already-open permalink page — lets callers
   // re-check staleness right before opening it (see TweetDetails.replies).
@@ -425,6 +437,7 @@ export async function extractCurrentTweet(
     fullText,
     url: page.url(),
     imageUrls,
+    hasVideo,
     latestSegmentAt,
     replies,
     isRoot,

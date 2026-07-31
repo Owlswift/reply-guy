@@ -288,16 +288,17 @@ export async function runCatchup(
 
         const tweetText = details.fullText || details.text;
 
-        // Image posts carry context an LLM can miss, so they're a manual-
-        // review-only gate — skipped outright unless this is a top-priority
-        // handle (decision/scoreTweet.ts), where images still fall through
-        // to the same decision prompt below (respond, or let it time out
-        // and skip). Mirrors the SKIP_IMAGE_TWEETS gate main-interactive.ts
-        // enforces for its own discovery/posting flow.
-        const hasImages = Boolean(details.imageUrls && details.imageUrls.length > 0);
+        // Media posts (image, video, or GIF) carry context an LLM can
+        // miss, so they're a manual-review-only gate — skipped outright
+        // unless this is a top-priority handle (decision/scoreTweet.ts),
+        // where media still falls through to the same decision prompt
+        // below (respond, or let it time out and skip). Mirrors the
+        // SKIP_IMAGE_TWEETS gate main-interactive.ts enforces for its own
+        // discovery/posting flow.
+        const hasMedia = Boolean((details.imageUrls && details.imageUrls.length > 0) || details.hasVideo);
         const isTopHandle = isTopPriority(details.handle || cleanHandle, details.handle || cleanHandle);
-        if (SKIP_IMAGE_TWEETS && hasImages && !isTopHandle) {
-          const reason = "has image(s), not a top-priority handle, SKIP_IMAGE_TWEETS is on";
+        if (SKIP_IMAGE_TWEETS && hasMedia && !isTopHandle) {
+          const reason = "has media, not a top-priority handle, SKIP_IMAGE_TWEETS is on";
           log(`${label} ${post.url} ${reason} — skipping.`);
           markReplied(post.id, reason);
           skipped.push({ url: post.url, reason });

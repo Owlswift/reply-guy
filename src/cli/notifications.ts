@@ -213,6 +213,7 @@ async function main() {
           threadData,
           reply,
           echoHandle: ECHO_HANDLE,
+          replyClass: classification.replyClass,
           page: notifPage,
         });
         if (isLikeOnly) {

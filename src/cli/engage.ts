@@ -147,6 +147,7 @@ async function main() {
         threadData,
         reply,
         echoHandle,
+        replyClass: classification.replyClass,
       });
       if (isLikeOnly) {
         likesGiven++;

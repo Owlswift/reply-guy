@@ -6,10 +6,11 @@ import { isLoggedIn } from "./browser/isLoggedIn";
 import { enqueue, queueSize, getQueue, QueueItem, peek, dequeue, updateItem, reRankQueue, clearQueue } from "./core/queue";
 import { pollDelay, getProfileLabel } from "./behavior/profiles";
 import { NotificationFeedSource } from "./sources/NotificationFeedSource";
+import { TimelineTweet } from "./types/tweet";
 import { getNotificationProgress, markNotificationSeen, hasNotificationReplied } from "./storage/seenNotifications";
 import { getRepliedReason, isPermanentlySkipped } from "./storage/repliedTweets";
 import { hasUrlBeenReplied, markUrlReplied } from "./storage/repliedUrls";
-import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isTopPriority, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, TOP_PRIORITY_HANDLES } from "./decision/scoreTweet";
+import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, isTopPriority } from "./decision/scoreTweet";
 import { flagPostForReview } from "./storage/flaggedPosts";
 // recordStoryTeller import removed — no longer adding new story teller handles to Redis
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
@@ -42,7 +43,6 @@ import { promptReplyDecision, ReplyDecision } from "./cli/promptReplyDecision";
 import { promptGenerationFailedDecision, GenerationFailedDecision } from "./cli/promptGenerationFailed";
 import { postManualReply, hasManualReply, ManualReplyResult } from "./cli/postManualReply";
 import { alwaysSendToChatGPT, alwaysPromptBeforeReply } from "./decision/posterProfiles";
-import { markSkippedForImage, wasSkippedForImage } from "./storage/skippedImageTweets";
 import { markSkippedByOperator, wasSkippedByOperator } from "./storage/operatorSkippedTweets";
 import {
   getReadingTime,
@@ -126,6 +126,51 @@ function parseStringFlag(argv: string[], name: string): string | null {
 // interactive prompt would just hang forever waiting for input that can
 // never arrive.
 const aiFlag = parseStringFlag(process.argv.slice(2), "ai");
+
+// Presence-only flag — no value needed, just `--skip-reposts`. When set,
+// reposts (X's own "reposted" cards — see extractTweets.ts's isRepost) are
+// skipped outright regardless of handle, so the run only engages with
+// original content. Also readable as SKIP_REPOSTS=true in .env — the CLI
+// flag never reaches a run launched through
+// ensure-running.sh/watch-and-restart.sh/launchd (none of those forward
+// argv), but .env is loaded via dotenv/config regardless of how the
+// process was started.
+const skipRepostsFlag =
+  process.argv.slice(2).includes("--skip-reposts") || process.env.SKIP_REPOSTS === "true";
+
+// A repost is only actually someone ELSE's content resurfacing — unless the
+// reposter IS the original author, in which case it's just them bumping
+// their own post back into view, not the "reposting other people's stuff"
+// case the repost-skip rules below exist for. Neither repost-skip check
+// (image+repost, --skip-reposts) applies to this case; it's processed like
+// any other original post instead. Doesn't need its own "already replied"
+// check — isPermanentlySkipped(tweet.id) already runs earlier in both
+// loops below and catches this by tweet id regardless of repost status, so
+// a self-repost of something already answered is filtered out before ever
+// reaching these repost-specific checks.
+function isSelfRepost(tweet: TimelineTweet): boolean {
+  if (!tweet.isRepost || !tweet.reposterHandle) return false;
+  return tweet.username.replace(/^@/, "").toLowerCase() === tweet.reposterHandle.toLowerCase();
+}
+
+// A single handle let through the pre-open media skip below regardless of
+// media — @EricLDaugh specifically, by request, distinct from (and checked
+// alongside) the TOP_PRIORITY_HANDLES tier.
+const ALWAYS_ALLOW_MEDIA_HANDLE = "ericldaugh";
+
+// Whether media (image/video, detectable before ever opening the tweet —
+// see extractTweets.ts's hasImage/hasVideo) is allowed through untouched.
+// Checked against both the original author and, for a repost, whoever did
+// the reposting, so either one being the special handle counts.
+function isSpecialMediaHandle(tweet: TimelineTweet): boolean {
+  const handle = tweet.username.replace(/^@/, "").toLowerCase();
+  if (handle === ALWAYS_ALLOW_MEDIA_HANDLE || isTopPriority(tweet.author, tweet.username)) return true;
+  if (tweet.reposterHandle) {
+    const reposter = tweet.reposterHandle.toLowerCase();
+    if (reposter === ALWAYS_ALLOW_MEDIA_HANDLE || isTopPriority(tweet.reposterHandle, tweet.reposterHandle)) return true;
+  }
+  return false;
+}
 
 // ─── Table-formatted per-tweet outcome logging ──────────────────────────────
 // Every notification's fate (skipped or queued, and why) gets logged as a
@@ -266,12 +311,10 @@ function startWatchdog(): NodeJS.Timeout {
   return timer;
 }
 
-/**
- * When true, tweets with images are skipped automatically instead of
- * pausing for manual review — lets the bot run fully unattended.
- * Set SKIP_IMAGE_TWEETS=true in .env to enable.
- */
-const SKIP_IMAGE_TWEETS = process.env.SKIP_IMAGE_TWEETS === "true";
+// How long the image-decision prompt (PHASE 4 below) waits for an operator
+// answer before defaulting to "skip" — shorter than the general
+// PROMPT_TIMEOUT_MS (20s) used by every other decision prompt in this file.
+const IMAGE_DECISION_TIMEOUT_MS = 10_000;
 
 /**
  * Notification-centric Echo.
@@ -351,6 +394,11 @@ async function main() {
   });
 
   log(`Behavior profile: ${getProfileLabel()}`);
+  // Logged once at startup so "is this flag actually on for THIS run" is
+  // answerable straight from the log instead of having to reason about it
+  // after the fact — every source (argv, .env, and a stale shell export
+  // shadowing .env) resolves to a single boolean before this point anyway.
+  log(`Flags: --skip-reposts is ${skipRepostsFlag ? "ON" : "off"}.`);
 
   // Initialize the chosen AI client (opens a new tab)
   const aiProvider = await resolveAiProvider();
@@ -651,20 +699,25 @@ async function main() {
           continue;
         }
 
-        // Image tweets are detectable from the timeline card itself — skip
-        // enqueueing (and thus opening) them entirely instead of paying for
-        // a full open→detect→goBack cycle, mirroring the SKIP_IMAGE_TWEETS
-        // gate that used to only run after the tweet was already open.
-        // Top-priority handles (scoreTweet.ts) are exempt — their image
-        // tweets always get opened for manual review, never skipped.
-        if (
-          SKIP_IMAGE_TWEETS &&
-          tweet.hasImage &&
-          !alwaysSendToChatGPT(tweet.username) &&
-          !isTopPriority(tweet.author, tweet.username)
-        ) {
-          logTweetOutcome("SKIP", tweet.url, "has image(s), SKIP_IMAGE_TWEETS is on", tweet.author);
-          markReplied(tweet.id, "has image(s), SKIP_IMAGE_TWEETS is on");
+        // A post with media (image, video, or GIF) is skipped entirely
+        // before ever opening it — detectable from the timeline card
+        // itself (extractTweets.ts's hasImage/hasVideo), so this avoids a
+        // full open→detect→goBack cycle just to hit the media gate further
+        // down anyway. Applies regardless of repost status. Exempt for
+        // @EricLDaugh or any TOP_PRIORITY_HANDLES account (isSpecialMediaHandle
+        // above) — those still enqueue/open normally, so PHASE 4's media
+        // gate can pause for a manual decision same as any other post.
+        if ((tweet.hasImage || tweet.hasVideo) && !isSpecialMediaHandle(tweet)) {
+          logTweetOutcome("SKIP", tweet.url, "has media, not a special handle — skipping before opening", tweet.author);
+          markReplied(tweet.id, "has media, not a special handle — skipping before opening");
+          continue;
+        }
+
+        // --skip-reposts — only engage with original content this run.
+        // Same self-repost exemption as above.
+        if (skipRepostsFlag && tweet.isRepost && !isSelfRepost(tweet)) {
+          logTweetOutcome("SKIP", tweet.url, "is a repost, --skip-reposts is on", tweet.author);
+          markReplied(tweet.id, "is a repost, --skip-reposts is on");
           continue;
         }
 
@@ -824,28 +877,6 @@ async function main() {
           if (previouslySkippedByOperator) {
             log(`Tweet ${item.id} previously skipped by operator — not opening.`);
             markReplied(item.id, "operator previously chose to skip this gated-handle tweet");
-            dequeue();
-            continue;
-          }
-
-          // Check Redis BEFORE opening the tweet — if we already know this
-          // URL has image(s) and was skipped before, don't waste a navigation
-          // on it again. Poster overrides and top-priority handles still get
-          // opened regardless.
-          // Fails open (treated as "not previously skipped") if Redis is
-          // unreachable, so a Redis outage degrades to pre-Redis behavior
-          // instead of every tweet erroring out and getting dropped.
-          let previouslySkippedForImage = false;
-          if (!alwaysSendToChatGPT(item.author) && !isTopPriority(item.author, item.author)) {
-            try {
-              previouslySkippedForImage = await wasSkippedForImage(item.url);
-            } catch (err) {
-              log(`Redis check failed for ${item.id}, proceeding anyway: ${err}`);
-            }
-          }
-          if (previouslySkippedForImage) {
-            log(`Tweet ${item.id} previously skipped for image(s) — not opening.`);
-            markReplied(item.id, "previously skipped for image(s)");
             dequeue();
             continue;
           }
@@ -1196,62 +1227,50 @@ async function main() {
           }
 
           // ============================================================
-          // Image gate — pause and ask before letting AI touch a tweet
-          // that has an image, since images carry context an LLM can miss.
-          // SKIP_IMAGE_TWEETS auto-skips any image tweet (the text-length
-          // exception is commented out below).
-          // Poster overrides (see posterProfiles.ts) bypass this gate
-          // entirely — always straight to ChatGPT, image or no image.
-          // Top-priority handles (scoreTweet.ts) take precedence over both:
-          // their image tweets always pause for manual review, never
-          // auto-skipped and never auto-sent to ChatGPT.
-          // A gated handle whose operator already chose "chatgpt" above
-          // also bypasses this gate — they already made the call, no need
-          // to prompt a second time just because the tweet has an image.
+          // Media gate — pause and ask before letting AI touch a tweet
+          // that has an image, video, or GIF, since media carries context
+          // an LLM can miss. A repost with media never reaches here at all
+          // — it's filtered out at enqueue time (see the discovery/
+          // freshTweets loops above), before ever being opened. So by
+          // construction, anything reaching this point with media is an
+          // ORIGINAL post, and always pauses for a decision — never
+          // auto-skipped. Poster overrides (see posterProfiles.ts) bypass
+          // this gate entirely — always straight to ChatGPT, media or no
+          // media. A gated handle whose operator already chose "chatgpt"
+          // above also bypasses this gate — they already made the call,
+          // no need to prompt a second time just because the tweet has
+          // media.
           // ============================================================
           const posterHandle = details.handle || item.author;
-          const hasImages = Boolean(details.imageUrls && details.imageUrls.length > 0);
-          const isTopPriorityPoster = isTopPriority(posterHandle, posterHandle);
-          const isOverridePoster = !isTopPriorityPoster && (alwaysSendToChatGPT(posterHandle) || operatorChoseChatGpt);
+          const imageCount = details.imageUrls?.length ?? 0;
+          const hasMedia = imageCount > 0 || details.hasVideo;
+          const isOverridePoster = alwaysSendToChatGPT(posterHandle) || operatorChoseChatGpt;
+          const mediaLabel =
+            imageCount > 0 && details.hasVideo
+              ? `${imageCount} image(s) and a video`
+              : imageCount > 0
+              ? `${imageCount} image(s)`
+              : "a video";
 
-          if (hasImages && isOverridePoster) {
-            log(`Tweet ${item.id} from ${posterHandle} has image(s) — poster override, sending straight to ChatGPT.`);
+          if (hasMedia && isOverridePoster) {
+            log(`Tweet ${item.id} from ${posterHandle} has media (${mediaLabel}) — poster override, sending straight to ChatGPT.`);
           }
 
-          if (hasImages && !isOverridePoster) {
-            // const tweetContext = details.fullText || details.text || item.text || "";
-            if (SKIP_IMAGE_TWEETS && !isTopPriorityPoster /* && tweetContext.length <= 30 */) {
-              log(`Tweet ${item.id} has image(s) — SKIP_IMAGE_TWEETS is on, skipping.`);
-              await markSkippedForImage(item.url).catch(err =>
-                log(`Redis write failed for ${item.id}, continuing anyway: ${err}`)
-              );
-              markReplied(item.id, "has image(s), SKIP_IMAGE_TWEETS is on (caught after opening)");
-              await navigator.returnToTimeline();
-              dequeue();
-              continue;
-            }
-
-            if (isTopPriorityPoster) {
-              log(`Tweet ${item.id} from ${posterHandle} has image(s) — top-priority handle, pausing for your review.`);
-            }
-
-            log(`=== TWEET ${item.id} HAS IMAGE(S) — PAUSING FOR REVIEW ===`);
-            const stopNotificationLoop = startNotificationLoop();
-
-            let decision: ImageDecision;
-            try {
-              decision = await promptImageDecision(
-                details.handle || item.author,
-                details.fullText || details.text || item.text,
-                details.imageUrls.length
-              );
-            } finally {
-              stopNotificationLoop();
-            }
+          if (hasMedia && !isOverridePoster) {
+            log(`=== TWEET ${item.id} HAS MEDIA (${mediaLabel}) — PAUSING FOR REVIEW ===`);
+            // No notification sound for this particular prompt (by
+            // request) — unlike the other decision prompts in this file,
+            // which still ping while waiting.
+            const decision: ImageDecision = await promptImageDecision(
+              details.handle || item.author,
+              details.fullText || details.text || item.text,
+              mediaLabel,
+              IMAGE_DECISION_TIMEOUT_MS
+            );
 
             if (decision === "skip") {
-              log(`No response for image tweet ${item.id} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping.`);
-              markReplied(item.id, `no operator response to the image gate within ${PROMPT_TIMEOUT_MS / 1000}s`);
+              log(`No response for media tweet ${item.id} within ${IMAGE_DECISION_TIMEOUT_MS / 1000}s — skipping.`);
+              markReplied(item.id, `no operator response to the media gate within ${IMAGE_DECISION_TIMEOUT_MS / 1000}s`);
               markNotificationReplied(item.id);
               await navigator.returnToTimeline();
               dequeue();
@@ -1266,7 +1285,7 @@ async function main() {
               continue;
             }
 
-            log(`Passing image tweet ${item.id} to ChatGPT for an automated reply.`);
+            log(`Passing media tweet ${item.id} to ChatGPT for an automated reply.`);
           }
 
           // Reading time — scales with fatigue
@@ -1738,14 +1757,17 @@ async function main() {
                 logTweetOutcome("SKIP", ft.url, `posted ${Math.round(ftAgeMs / 1000)}s ago, too fresh — might still be mid-thread`, ft.author);
                 continue;
               }
-              if (
-                SKIP_IMAGE_TWEETS &&
-                ft.hasImage &&
-                !alwaysSendToChatGPT(ft.username) &&
-                !isTopPriority(ft.author, ft.username)
-              ) {
-                logTweetOutcome("SKIP", ft.url, "has image(s), SKIP_IMAGE_TWEETS is on", ft.author);
-                markReplied(ft.id, "has image(s), SKIP_IMAGE_TWEETS is on");
+              // A post with media is skipped before ever opening it,
+              // regardless of repost status — same rule as the discovery
+              // loop above, with the same @EricLDaugh/top-priority exemption.
+              if ((ft.hasImage || ft.hasVideo) && !isSpecialMediaHandle(ft)) {
+                logTweetOutcome("SKIP", ft.url, "has media, not a special handle — skipping before opening", ft.author);
+                markReplied(ft.id, "has media, not a special handle — skipping before opening");
+                continue;
+              }
+              if (skipRepostsFlag && ft.isRepost && !isSelfRepost(ft)) {
+                logTweetOutcome("SKIP", ft.url, "is a repost, --skip-reposts is on", ft.author);
+                markReplied(ft.id, "is a repost, --skip-reposts is on");
                 continue;
               }
               const ftIsPriorityHandle = isUrgent(ft.author, ft.username) || isPriority(ft.author, ft.username);

@@ -120,6 +120,12 @@ export async function extractTweets(
             // before ever navigating to them.
             const hasImage = !!article.querySelector('[data-testid="tweetPhoto"]');
 
+            // Video or GIF — X renders both through the same
+            // [data-testid="videoPlayer"] component (a GIF is just a
+            // silent, auto-looping video under the hood), so one flag
+            // covers both rather than trying to tell them apart.
+            const hasVideo = !!article.querySelector('[data-testid="videoPlayer"]');
+
             // Detect "Replying to @X". Find the innermost (shortest)
             // matching div/span anywhere in the article rather than
             // requiring the article's whole flattened textContent to start
@@ -195,6 +201,7 @@ export async function extractTweets(
                 source,
                 createdAt,
                 hasImage,
+                hasVideo,
                 isReply,
                 isRepost,
                 isPinned,
