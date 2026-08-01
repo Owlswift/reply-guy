@@ -35,7 +35,8 @@ const PRIORITY_HANDLES: string[] = [
   "@6th_july",
   "@RiddleSphere",
   "@Drew_Scarlet98",
-  "@cutelipsxx"
+  "@cutelipsxx",
+  "cyberfeeels"
 ];
 
 const PRIORITY_BONUS = 30; // flat score boost for priority handles

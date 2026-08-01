@@ -75,7 +75,16 @@ export class ChatGPTClient {
    * inside an unrelated template.
    */
   async generateRawReply(prompt: string): Promise<string> {
-    return lowercaseFirstLetter((await this.sendPromptAndReadReply(prompt)).trim());
+    const reply = await this.sendPromptAndReadReply(prompt);
+    // genAIEngagePrompt doesn't itself ask for a "REPLY:" marker, but the
+    // model can still produce one out of habit (bleed from the same
+    // underlying format it's trained/primed on elsewhere) or wrap the
+    // answer in a refusal-flavored preamble ("I can't share my reasoning,
+    // but here's the reply: ..."). parseStructuredReply is a no-op falling
+    // back to the raw text when no marker is present, so this is a free
+    // safety net, not a behavior change for the common case.
+    const { reply: replyText } = parseStructuredReply(reply);
+    return lowercaseFirstLetter(replyText.trim());
   }
 
   /**

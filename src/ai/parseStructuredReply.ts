@@ -21,26 +21,39 @@ export function lowercaseFirstLetter(text: string): string {
  * instruction, part of the Stage 1-understand/Stage 2-write structure) —
  * lets callers log what the model concluded before writing, for a human to
  * actually assess it, without that checklist ever being posted as part of
- * the reply itself. Finds the "REPLY:" marker anywhere in the text and
- * takes everything after it as the reply, regardless of what (if anything)
- * precedes it — NOT anchored to "preceded by a newline". The model doesn't
- * always emit the INTERNAL CONTEXT checklist before it; when it skips
- * straight to "REPLY: ..." as the very first thing in the response, there
- * is no newline before the marker at all, and a regex requiring one
- * (`^([\s\S]*?)\n\s*REPLY:`) fails to match — falling back to posting the
- * literal "REPLY: ..." prefix verbatim as part of the reply, which is
- * exactly the bug this exists to prevent.
+ * the reply itself.
+ *
+ * Uses the LAST "reply:" occurrence in the text, not the first — verified
+ * live against a real leak: when the model prefaces its answer with
+ * something like "I can't share my internal checklist, but here's the
+ * reply:" before the actual "REPLY: <text>" marker, the text contains
+ * "reply:" TWICE. Matching the first one (the old behavior) split at the
+ * casual mention instead of the real marker, leaving the genuine "REPLY:"
+ * stuck at the front of what got posted — confirmed from a live posted
+ * tweet that read "rEPLY: a kid finding...". The real structural marker is
+ * always the last one in the text (it's the final field in the model's
+ * output format), so taking the last occurrence instead is robust to this
+ * without needing to detect refusal-style preambles specifically.
+ *
+ * Not anchored to "preceded by a newline" either — the model doesn't
+ * always emit the INTERNAL CONTEXT checklist before it, and a regex
+ * requiring a newline before the marker fails whenever "REPLY: ..." is the
+ * very first thing in the response.
  *
  * Falls back to treating the whole raw text as the reply if the model
- * didn't include a "REPLY:" marker at all — LLMs don't always follow
+ * didn't include a "reply:" marker at all — LLMs don't always follow
  * format instructions exactly, and this must never be the reason a
  * perfectly good reply gets rejected.
  */
 export function parseStructuredReply(raw: string): ParsedReply {
-  const match = raw.match(/REPLY:\s*([\s\S]*)/i);
-  if (match && match[1]!.trim()) {
-    const understanding = raw.slice(0, match.index).trim();
-    return { understanding: understanding || null, reply: lowercaseFirstLetter(match[1]!.trim()) };
+  const MARKER = "reply:";
+  const markerIndex = raw.toLowerCase().lastIndexOf(MARKER);
+  if (markerIndex !== -1) {
+    const afterMarker = raw.slice(markerIndex + MARKER.length).trim();
+    if (afterMarker) {
+      const understanding = raw.slice(0, markerIndex).trim();
+      return { understanding: understanding || null, reply: lowercaseFirstLetter(afterMarker) };
+    }
   }
   return { understanding: null, reply: lowercaseFirstLetter(raw.trim()) };
 }

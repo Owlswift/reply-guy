@@ -393,6 +393,19 @@ async function main() {
     dialog.dismiss().catch(() => {});
   });
 
+  // Dedicated tab for opening/reading/replying to individual tweets —
+  // `page` above stays on the notifications feed for the entire run and
+  // never navigates away, mirroring catchup/runCatchup.ts's
+  // profilePage/tweetPage split. This is what makes navigator.goBack()'s
+  // incremental-scroll-restore hack (BrowserNavigator.ts) unnecessary for
+  // this file: there's nothing to "return" to since the feed page never
+  // left in the first place.
+  const { context } = await getBrowserAndContext();
+  const tweetPage = await context.newPage();
+  tweetPage.on("dialog", (dialog) => {
+    dialog.dismiss().catch(() => {});
+  });
+
   log(`Behavior profile: ${getProfileLabel()}`);
   // Logged once at startup so "is this flag actually on for THIS run" is
   // answerable straight from the log instead of having to reason about it
@@ -494,6 +507,10 @@ async function main() {
       // as "Session expired" when the real cause is the browser losing the tab.
       if (page.isClosed()) {
         log("Browser tab was closed or crashed. Stopping bot.");
+        break;
+      }
+      if (tweetPage.isClosed()) {
+        log("Tweet tab was closed or crashed. Stopping bot.");
         break;
       }
 
@@ -827,7 +844,7 @@ async function main() {
     // ============================================================
     // PHASE 2: PROCESS QUEUE — reply to highest-priority first
     // ============================================================
-    while (queueSize() > 0 && stats.posted < DAILY_LIMIT && !page.isClosed()) {
+    while (queueSize() > 0 && stats.posted < DAILY_LIMIT && !page.isClosed() && !tweetPage.isClosed()) {
       const item = peek();
       if (!item) break;
 
@@ -896,26 +913,30 @@ async function main() {
             continue;
           }
 
-          // Scroll position is now saved inside BrowserNavigator.openTweet()
-          // itself — centralized so every caller gets it, not just this one.
-          await navigator.openTweet(item.url);
+          // Opens on tweetPage, not the feed page — see the dedicated-tab
+          // setup at the top of main(). No scroll-save needed here (that
+          // was only ever for restoring the feed's own scroll position
+          // after navigating away from it, which no longer happens).
+          log(`[TweetPage] Opening tweet: ${item.url}`);
+          await tweetPage.goto(item.url, { waitUntil: "domcontentloaded" });
+          await tweetPage.waitForSelector("article", { timeout: 15000 });
+          const { openDelay } = await import("./behavior/profiles");
+          await tweetPage.waitForTimeout(openDelay());
           markTweetActivity();
 
           // Skip if we can't reply
-          const replyButton = page.locator('[data-testid="reply"]').first();
+          const replyButton = tweetPage.locator('[data-testid="reply"]').first();
           if (!(await replyButton.isVisible().catch(() => false))) {
             log(`Reply unavailable. Skipping.`);
             markReplied(item.id, "reply button unavailable on the tweet page");
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
 
-          const details = await extractCurrentTweet(page);
+          const details = await extractCurrentTweet(tweetPage);
           if (!details) {
             log(`Cannot extract tweet ${item.id}. Skipping.`);
             markReplied(item.id, "could not extract tweet content from the page");
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -939,7 +960,6 @@ async function main() {
             logTweetOutcome("SKIP", item.url, openWordReason, details.handle || item.author);
             markReplied(item.id, openWordReason);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -963,7 +983,6 @@ async function main() {
             logTweetOutcome("SKIP", item.url, pidginReason, details.handle || item.author);
             markReplied(item.id, pidginReason);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -975,7 +994,6 @@ async function main() {
             logTweetOutcome("SKIP", item.url, "quote-tweet engagement bait", details.handle || item.author);
             markReplied(item.id, "quote-tweet engagement bait");
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -994,7 +1012,6 @@ async function main() {
 
             if (isPermanentlySkipped(details.rootId)) {
               logTweetOutcome("SKIP", item.url, "segment of an already-processed thread, no navigation needed beyond this", details.handle || item.author, details.rootUrl);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
@@ -1013,7 +1030,6 @@ async function main() {
               reRankQueue();
             }
 
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1037,7 +1053,6 @@ async function main() {
             logTweetOutcome("SKIP", item.url, replyToOtherReason, details.handle || item.author);
             markReplied(item.id, replyToOtherReason);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1054,7 +1069,6 @@ async function main() {
             logTweetOutcome("SKIP", item.url, repostReason, details.handle || item.author);
             markReplied(item.id, repostReason);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1083,7 +1097,6 @@ async function main() {
             log(`Tweet ${item.id} quotes blocked handle ${details.quotedTweetHandle} — skipping.`);
             markReplied(item.id, `quotes blocked handle ${details.quotedTweetHandle}`);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1091,7 +1104,6 @@ async function main() {
             log(`Tweet ${item.id} is a reply to blocked handle ${details.parentTweetHandle} — skipping.`);
             markReplied(item.id, `is a reply to blocked handle ${details.parentTweetHandle}`);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1103,7 +1115,6 @@ async function main() {
             log(`Tweet ${item.id} quotes a blocked bait tweet — skipping.`);
             markReplied(item.id, "quotes a blocked bait tweet");
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1125,18 +1136,16 @@ async function main() {
             log(`Tweet ${item.id} is stale (${details.replies} replies, ${Math.round(staleAgeMinutes)}m old) — skipping.`);
             markReplied(item.id, `stale (${details.replies} replies, ${Math.round(staleAgeMinutes)}m old)`);
             markNotificationReplied(item.id);
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
 
           // Check if @unfairleverage has already replied manually.
-          if (await hasManualReply(page)) {
+          if (await hasManualReply(tweetPage)) {
             log(`Already replied to ${item.id} manually. Skipping.`);
             // Mark as replied in the database to prevent future checks
             markNotificationReplied(item.id);
             markReplied(item.id, "already replied to manually (found existing reply on the page)");
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1149,7 +1158,7 @@ async function main() {
           // - "You're unable to reply" toast or notice
           // - Only verified accounts / people @mentioned can reply
           // ============================================================
-          const canReply = await page.evaluate(() => {
+          const canReply = await tweetPage.evaluate(() => {
             const replyBtn = document.querySelector('[data-testid="reply"]');
             // No reply button at all — can't reply
             if (!replyBtn) return false;
@@ -1168,7 +1177,6 @@ async function main() {
           if (!canReply) {
             log(`Cannot reply to ${item.id} — replies are restricted. Skipping.`);
             markReplied(item.id, "replies are restricted on this tweet");
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1209,15 +1217,13 @@ async function main() {
                 ? `operator explicitly chose to skip this gated-handle post from ${gatedPosterHandle}`
                 : `no operator response within ${PROMPT_TIMEOUT_MS / 1000}s for gated-handle post from ${gatedPosterHandle}`);
               markNotificationReplied(item.id);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
 
             if (decision === "myself") {
-              const manualResult: ManualReplyResult = await postManualReply(page, details.handle || item.author);
+              const manualResult: ManualReplyResult = await postManualReply(tweetPage, details.handle || item.author);
               await finalizeManualReply(item, details, manualResult);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
@@ -1272,15 +1278,13 @@ async function main() {
               log(`No response for media tweet ${item.id} within ${IMAGE_DECISION_TIMEOUT_MS / 1000}s — skipping.`);
               markReplied(item.id, `no operator response to the media gate within ${IMAGE_DECISION_TIMEOUT_MS / 1000}s`);
               markNotificationReplied(item.id);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
 
             if (decision === "myself") {
-              const manualResult: ManualReplyResult = await postManualReply(page, details.handle || item.author);
+              const manualResult: ManualReplyResult = await postManualReply(tweetPage, details.handle || item.author);
               await finalizeManualReply(item, details, manualResult);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
@@ -1291,7 +1295,7 @@ async function main() {
           // Reading time — scales with fatigue
           const tweetText = details.fullText || details.text || item.text;
           const readTime = getReadingTime(tweetText);
-          await page.waitForTimeout(readTime);
+          await tweetPage.waitForTimeout(readTime);
 
           const { MemoryRepository } = await import("./database/MemoryRepository");
           const memoryRepo = new MemoryRepository();
@@ -1300,7 +1304,7 @@ async function main() {
           // Micro-break before drafting — scales with fatigue
           const microBreak = getMicroBreak();
           if (microBreak > 0) {
-            await page.waitForTimeout(microBreak);
+            await tweetPage.waitForTimeout(microBreak);
           }
 
           // Determine tweet type to decide which model to use
@@ -1322,7 +1326,6 @@ async function main() {
             if (!reply) {
               log(`No response for ${tweetType} tweet ${item.id} within ${PROMPT_TIMEOUT_MS / 1000}s — skipping.`);
               markReplied(item.id, `no manual response for a ${tweetType} tweet within ${PROMPT_TIMEOUT_MS / 1000}s`);
-              await navigator.returnToTimeline();
               dequeue();
               continue;
             }
@@ -1408,14 +1411,13 @@ async function main() {
             }
 
             if (genFailedDecision === "myself") {
-              const manualResult = await postManualReply(page, details.handle || item.author);
+              const manualResult = await postManualReply(tweetPage, details.handle || item.author);
               await finalizeManualReply(item, details, manualResult);
             } else {
               log(`Operator chose to skip tweet ${item.id} after generation failure.`);
               markReplied(item.id, "operator chose to skip after AI generation failed to produce a valid reply");
             }
 
-            await navigator.returnToTimeline();
             dequeue();
             continue;
           }
@@ -1454,11 +1456,10 @@ async function main() {
         // pending phase, timing something (reading the tweet) that had
         // already happened. Dropped it; the brief thinking-time pause below
         // is enough of a "glance before posting" beat on its own.
-        const details = await extractCurrentTweet(page);
+        const details = await extractCurrentTweet(tweetPage);
         if (!details) {
           log(`Cannot extract tweet ${item.id}. Skipping.`);
           markReplied(item.id, "could not re-extract tweet content in the posting phase");
-          await navigator.returnToTimeline();
           dequeue();
           continue;
         }
@@ -1468,7 +1469,7 @@ async function main() {
         // Thinking time — brief pause before posting
         const thinkTime = getThinkingTime();
         if (thinkTime > 0) {
-          await page.waitForTimeout(thinkTime);
+          await tweetPage.waitForTimeout(thinkTime);
         }
 
         // Determine tweet type
@@ -1495,8 +1496,8 @@ async function main() {
           let posted = false;
           if (autoDraft) {
             const { prepareReply, clickReply } = await import("./reply/reply");
-            await prepareReply(page, autoDraft, item.id);
-            posted = await clickReply(page, details.handle || item.author);
+            await prepareReply(tweetPage, autoDraft, item.id);
+            posted = await clickReply(tweetPage, details.handle || item.author);
           }
 
           markReplied(item.id, posted
@@ -1599,8 +1600,8 @@ async function main() {
           // enqueueing. See the commented-out queued version below to
           // re-enable src/dispatcher.ts routing.
           const { prepareReply, clickReply } = await import("./reply/reply");
-          await prepareReply(page, item.draft!, item.id);
-          const posted = await clickReply(page, details.handle || item.author);
+          await prepareReply(tweetPage, item.draft!, item.id);
+          const posted = await clickReply(tweetPage, details.handle || item.author);
 
           markReplied(item.id, posted
             ? `posted a ${aiProviderLabel(aiProvider)} reply`
@@ -1685,14 +1686,11 @@ async function main() {
         }
 
         // ============================================================
-        // PHASE 5: RETURN TO NOTIFICATIONS + pause
+        // PHASE 5: POST-REPLY PAUSE
         // ============================================================
-        log(`=== PHASE: RETURN TO NOTIFICATIONS ===`);
-        // Scroll restoration now happens inside BrowserNavigator's
-        // goBack()/returnToTimeline() themselves (see restoreScrollPosition
-        // there) — centralized so every skip branch gets it too, not just
-        // this post-reply path.
-        await notificationSource.returnToPostsFeed(navigator);
+        // No navigation here anymore — `page` (the feed) never left in the
+        // first place (see the dedicated tweetPage setup in main()), so
+        // there's nothing to return to and no scroll position to restore.
 
         // Post-reply pause — scales with fatigue
         const postPause = getPostReplyPause();
@@ -1714,6 +1712,10 @@ async function main() {
         try {
           if (page.isClosed()) {
             log("Browser tab was closed or crashed. Stopping bot.");
+            break;
+          }
+          if (tweetPage.isClosed()) {
+            log("Tweet tab was closed or crashed. Stopping bot.");
             break;
           }
           if (!(await isLoggedIn(page))) {
@@ -1790,7 +1792,6 @@ async function main() {
 
       } catch (err) {
         log(`Cannot reply to tweet ${item.id}. Skipping.`);
-        await notificationSource.returnToPostsFeed(navigator);
         dequeue();
       }
     }
