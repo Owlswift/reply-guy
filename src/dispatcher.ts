@@ -30,6 +30,7 @@ const DELAY_RANGES_MS: Record<ReplyJob["source"], [number, number]> = {
   interactive: [25_000, 100_000],
   catchup_priority: [40_000, 100_000],
   catchup_stories: [60_000, 120_000],
+  catchup_forex_crypto: [10_000, 40_000],
 };
 
 // How often to check the queue when it's empty, or when the daily cap is

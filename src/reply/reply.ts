@@ -4,6 +4,7 @@ import { typeReply } from "./typeReply";
 import { submitReply } from "./submitReply";
 import { logReply } from "../core/logger";
 import { recordReplyForHour } from "../storage/hourlyReplyStats";
+import { acquirePostLock, releasePostLock } from "../storage/postLock";
 
 // Fill the reply textbox (without submitting)
 export async function prepareReply(
@@ -32,8 +33,22 @@ export async function clickReply(
   page: Page,
   author: string = ""
 ): Promise<boolean> {
-  // Submit (or just log in dry-run mode)
-  const success = await submitReply(page);
+  // Only one process may actually submit a reply at a time — see
+  // storage/postLock.ts. Blocks here if another script (main-interactive.ts,
+  // notifications.ts/engage.ts, catchup:priority, catchup:stories) is
+  // mid-post right now, or if the cooldown since the last post anywhere
+  // hasn't elapsed yet, so two independently-running scripts never post
+  // within seconds of each other. Scoped to just the submit — typing
+  // (prepareReply, above) already happened and isn't itself observable, so
+  // it isn't held up by this.
+  await acquirePostLock();
+  let success: boolean;
+  try {
+    // Submit (or just log in dry-run mode)
+    success = await submitReply(page);
+  } finally {
+    await releasePostLock();
+  }
 
   // Log the result
   logReply({

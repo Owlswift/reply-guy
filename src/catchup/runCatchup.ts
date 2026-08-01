@@ -85,7 +85,7 @@ export async function runCatchup(
   context: BrowserContext,
   handles: string[],
   label: string,
-  source: "catchup_priority" | "catchup_stories",
+  source: "catchup_priority" | "catchup_stories" | "catchup_forex_crypto",
   maxAgeMs: number = DEFAULT_MAX_AGE_MS,
   options?: RunCatchupOptions
 ): Promise<CatchupTotals> {
@@ -295,9 +295,16 @@ export async function runCatchup(
         // below (respond, or let it time out and skip). Mirrors the
         // SKIP_IMAGE_TWEETS gate main-interactive.ts enforces for its own
         // discovery/posting flow.
+        //
+        // catchup_forex_crypto is exempt from the auto-skip entirely —
+        // chart/trade screenshots are exactly the substance of what these
+        // accounts post, so silently skipping their image posts would miss
+        // most of the actual content. Media from this source always falls
+        // through to the decision prompt below, regardless of
+        // SKIP_IMAGE_TWEETS or top-priority status.
         const hasMedia = Boolean((details.imageUrls && details.imageUrls.length > 0) || details.hasVideo);
         const isTopHandle = isTopPriority(details.handle || cleanHandle, details.handle || cleanHandle);
-        if (SKIP_IMAGE_TWEETS && hasMedia && !isTopHandle) {
+        if (SKIP_IMAGE_TWEETS && hasMedia && !isTopHandle && source !== "catchup_forex_crypto") {
           const reason = "has media, not a top-priority handle, SKIP_IMAGE_TWEETS is on";
           log(`${label} ${post.url} ${reason} — skipping.`);
           markReplied(post.id, reason);

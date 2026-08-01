@@ -12,7 +12,8 @@ import { getRepliedReason, isPermanentlySkipped } from "./storage/repliedTweets"
 import { hasUrlBeenReplied, markUrlReplied } from "./storage/repliedUrls";
 import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, isTopPriority } from "./decision/scoreTweet";
 import { flagPostForReview } from "./storage/flaggedPosts";
-// recordStoryTeller import removed — no longer adding new story teller handles to Redis
+import { recordForexCryptoHandle } from "./storage/forexCryptoHandles";
+import { isForexOrCrypto } from "./decision/forexCryptoDetection";
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
 import { findBlockedContentWord } from "./decision/blockedContentWords";
@@ -947,8 +948,22 @@ async function main() {
           // a thread's ROOT — the forward walk found later same-author
           // segments merged into fullText). Recorded here, once, regardless
           // of which direction found it or what happens to this tweet next.
-          // NOTE: recordStoryTeller was removed — no longer adding new
-          // story teller handles to Redis.
+          // Forex/crypto user discovery — if this tweet's content (full
+          // text, including any merged thread segments) mentions forex
+          // and/or crypto trading vocabulary, record the author's handle
+          // in Redis (storage/forexCryptoHandles.ts) so a later catch-up
+          // script (catchupForexCrypto.ts) can run through them the same
+          // way catchupStoryTellers.ts runs through story-teller accounts.
+          // Recorded here, once, regardless of what happens to this tweet
+          // next — the author is "into forex/crypto" whether or not this
+          // particular post gets a reply.
+          const forexCryptoText = details.fullText || details.text;
+          if (isForexOrCrypto(forexCryptoText)) {
+            const forexCryptoHandle = details.handle || item.author;
+            await recordForexCryptoHandle(forexCryptoHandle).catch(err =>
+              log(`Redis write failed recording forex/crypto handle ${forexCryptoHandle}, continuing anyway: ${err}`)
+            );
+          }
 
           // Safety net for the enqueue-time content check above — the
           // timeline preview can be truncated, so a blocked word only
@@ -1177,6 +1192,36 @@ async function main() {
           if (!canReply) {
             log(`Cannot reply to ${item.id} — replies are restricted. Skipping.`);
             markReplied(item.id, "replies are restricted on this tweet");
+            dequeue();
+            continue;
+          }
+
+          // ============================================================
+          // Real eligibility probe — the text-pattern check above only
+          // catches restriction wording it already knows about ("can't
+          // reply", "unable to reply", etc.). Caught live: a tweet passed
+          // that check (reply button visible, not disabled, no matching
+          // text) but X's actual message was "You aren't allowed to reply
+          // to this Tweet" — none of the substrings above match "aren't
+          // allowed" — so canReply was wrongly true, and the failure only
+          // surfaced when openReplyBox() (inside prepareReply, at ACTUAL
+          // posting time) timed out waiting for the compose textarea to
+          // appear, after an entire ChatGPT round-trip had already been
+          // spent drafting a reply that could never be posted. Rather than
+          // keep guessing at wording, actually do the click + wait for the
+          // textarea here — cheap (a click and a short DOM wait) — and
+          // immediately close it again with nothing typed. The real
+          // prepareReply()/clickReply() later reopens it for real once a
+          // draft exists.
+          // ============================================================
+          try {
+            const { openReplyBox } = await import("./reply/openReplyBox");
+            await openReplyBox(tweetPage, item.id);
+            await tweetPage.keyboard.press("Escape");
+            await tweetPage.waitForTimeout(300);
+          } catch (err) {
+            log(`Reply composer would not open for ${item.id} (${err}) — skipping before drafting.`);
+            markReplied(item.id, "reply composer would not open (restricted or otherwise unavailable)");
             dequeue();
             continue;
           }

@@ -149,6 +149,7 @@ export const BLOCKED_HANDLES: string[] = [
   "@Mario_Sneh",
   "lyleswontmiss",
   "@unfairleverage",
+  "JusttJewell"
 ];
 
 /**

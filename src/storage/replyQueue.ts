@@ -15,7 +15,7 @@ import { Relationship } from "../relationship/types";
  * then 2, up through 4, so a burst of low-priority catchup jobs never
  * delays a higher-priority conversation reply behind it.
  */
-export type ReplySource = "interactive" | "conversation" | "catchup_priority" | "catchup_stories";
+export type ReplySource = "interactive" | "conversation" | "catchup_priority" | "catchup_stories" | "catchup_forex_crypto";
 
 export interface MemoryPayload {
   tweetId: string;
