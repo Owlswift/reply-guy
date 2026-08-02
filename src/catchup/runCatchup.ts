@@ -6,6 +6,11 @@ import { judgeReplies } from "../ai/judgeReply";
 import { validateReply } from "../personality/validator";
 import { isDuplicate } from "../personality/duplicate";
 import { markReplied, getRepliedReason, isPermanentlySkipped } from "../storage/repliedTweets";
+import {
+  markForexCryptoTweetHandled,
+  getForexCryptoHandledReason,
+  isForexCryptoTweetHandled,
+} from "../storage/forexCryptoTweetHandled";
 import { isBlockedHandle, isTopPriority } from "../decision/scoreTweet";
 import { findBlockedContentWord } from "../decision/blockedContentWords";
 import { isHeavyPidgin } from "../decision/pidginDetection";
@@ -15,6 +20,8 @@ import { promptReplyDecision, ReplyDecision } from "../cli/promptReplyDecision";
 import { MemoryRepository } from "../database/MemoryRepository";
 import { log } from "../utils/logger";
 import { prepareReply, clickReply } from "../reply/reply";
+import { openReplyBox } from "../reply/openReplyBox";
+import { waitForReplyTurn, recordQuotaReply } from "../storage/hourlyReplyQuota";
 // Dispatcher wiring — disconnected for now, scripts post directly/independently again.
 // import { enqueueReplyJob } from "../storage/replyQueue";
 
@@ -37,6 +44,34 @@ const SKIP_IMAGE_TWEETS = process.env.SKIP_IMAGE_TWEETS === "true";
 async function pace(): Promise<void> {
   const delay = MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS);
   await new Promise(r => setTimeout(r, delay));
+}
+
+export type CatchupSource = "catchup_priority" | "catchup_stories" | "catchup_forex_crypto";
+
+// Routes "is this tweet already handled" / "mark it handled" to the right
+// backing store for the source: catchup_forex_crypto uses its own 24h-TTL'd
+// Redis record (storage/forexCryptoTweetHandled.ts), everything else stays
+// on repliedTweets.ts's permanent local-file record.
+async function isAlreadyHandled(
+  source: CatchupSource,
+  id: string
+): Promise<{ handled: boolean; reason: string | undefined }> {
+  if (source === "catchup_forex_crypto") {
+    const [handled, reason] = await Promise.all([
+      isForexCryptoTweetHandled(id),
+      getForexCryptoHandledReason(id),
+    ]);
+    return { handled, reason };
+  }
+  return { handled: isPermanentlySkipped(id), reason: getRepliedReason(id) };
+}
+
+async function recordHandled(source: CatchupSource, id: string, reason: string): Promise<void> {
+  if (source === "catchup_forex_crypto") {
+    await markForexCryptoTweetHandled(id, reason);
+    return;
+  }
+  markReplied(id, reason);
 }
 
 export interface SkippedPost {
@@ -85,7 +120,7 @@ export async function runCatchup(
   context: BrowserContext,
   handles: string[],
   label: string,
-  source: "catchup_priority" | "catchup_stories" | "catchup_forex_crypto",
+  source: CatchupSource,
   maxAgeMs: number = DEFAULT_MAX_AGE_MS,
   options?: RunCatchupOptions
 ): Promise<CatchupTotals> {
@@ -128,13 +163,38 @@ export async function runCatchup(
 
       log(`${label} Scanning @${cleanHandle} (last ${maxAgeMs / 3_600_000}hr)...`);
       let postsSeen = 0;
+      // catchup_stories only: once this handle has gotten one reply, stop
+      // scanning its remaining posts in the window and move to the next
+      // handle — spreads the shared hourly budget across more distinct
+      // handles instead of one handle's whole backlog. Applies uniformly,
+      // including PRIORITY_STORY_TELLER_HANDLES (decision/scoreTweet.ts) —
+      // two replies to the same handle in one sitting reads as scripted;
+      // those handles instead get a whole session (catchupStoryTellers.ts)
+      // dedicated to just them every other run. Incremented only on an
+      // actual successful post, not on a skip/decline, so the scan can
+      // still try a different post from the same handle if a candidate was
+      // gated or declined for an unrelated reason.
+      let repliesThisHandle = 0;
+      const maxRepliesThisHandle = 1;
 
       // Handles each original post the moment it's found during the scan
       // (see scanProfileWithinWindow's doc comment for why this replaced
       // the old collect-then-process, redirect-to-root design) — every
       // post is judged purely on its own isRoot-ness; a continuation is
       // just ignored outright rather than redirected anywhere.
-      const handlePost = async (post: ProfileOriginalTweet): Promise<void> => {
+      const handlePost = async (post: ProfileOriginalTweet): Promise<void | true> => {
+        // Global hourly reply budget (storage/hourlyReplyQuota.ts) —
+        // pauses this whole run until the next hour once this hour's
+        // shared 6-12 target is reached (by this script or any other),
+        // and paces between individual replies otherwise so the budget
+        // spreads across the hour instead of firing back-to-back —
+        // before spending any resources on this post. catchup_forex_crypto
+        // opts out entirely, same as notifications.ts/engage.ts — it never
+        // waits for a turn and its posts don't count against the budget.
+        if (source !== "catchup_forex_crypto") {
+          await waitForReplyTurn(label);
+        }
+
         postsSeen++;
 
         // isPermanentlySkipped (not hasReplied) — a post marked done only
@@ -143,8 +203,9 @@ export async function runCatchup(
         // because they weren't at the keyboard for the 20s prompt) isn't a
         // real "never reply to this" decision. Retry it instead of treating
         // one bad ChatGPT attempt as a permanent block.
-        if (isPermanentlySkipped(post.id)) {
-          const reason = `already handled (${getRepliedReason(post.id) ?? "reason not recorded"})`;
+        const handledCheck = await isAlreadyHandled(source, post.id);
+        if (handledCheck.handled) {
+          const reason = `already handled (${handledCheck.reason ?? "reason not recorded"})`;
           log(`${label} ${post.url} ${reason} — skipping.`);
           skipped.push({ url: post.url, reason });
           totalSkippedAlreadyReplied++;
@@ -183,16 +244,37 @@ export async function runCatchup(
           return;
         }
 
+        // Real eligibility probe — the button-visible check above only
+        // catches "no reply button at all," not X's own restriction
+        // messages (e.g. "You aren't allowed to reply to this Tweet"),
+        // which still render a clickable-looking button. Same fix
+        // main-interactive.ts already applies: actually open the composer
+        // and immediately close it with nothing typed, cheap enough to do
+        // before spending extraction + a ChatGPT round-trip on a post that
+        // can never actually be posted to.
+        try {
+          await openReplyBox(tweetPage, post.id);
+          await tweetPage.keyboard.press("Escape");
+          await tweetPage.waitForTimeout(300);
+        } catch (err) {
+          const reason = `reply composer would not open (restricted or otherwise unavailable): ${err}`;
+          log(`${label} ${post.url} — reply composer would not open, skipping before extraction.`);
+          await recordHandled(source, post.id, reason);
+          skipped.push({ url: post.url, reason });
+          totalSkippedOther++;
+          return;
+        }
+
         // hasReplied() above only reflects Echo's own tracking — if you
         // replied to this outside of any Echo flow (typed directly in the
         // browser, replied from your phone, etc.), Echo never recorded it.
         // Check the live thread for an existing reply from your account
         // before treating this as unanswered, same safety net the main bot
-        // uses, and sync markReplied() so future runs don't ask again either.
+        // uses, and sync recordHandled() so future runs don't ask again either.
         if (await hasManualReply(tweetPage)) {
           const reason = "already replied manually outside Echo's tracking (found on the page)";
           log(`${label} Already replied to ${post.url} (found on the page, not in Echo's log) — syncing and skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedAlreadyReplied++;
           return;
@@ -232,7 +314,7 @@ export async function runCatchup(
         if (catchupBlockedWord) {
           const reason = `contains blocked word "${catchupBlockedWord}"`;
           log(`${label} ${post.url} ${reason} — skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -245,7 +327,7 @@ export async function runCatchup(
         if (isHeavyPidgin(catchupPidginContext)) {
           const reason = "heavy Nigerian Pidgin (tweet or its quoted/parent tweet), skipping to avoid an out-of-context reply";
           log(`${label} ${post.url} is heavy Nigerian Pidgin (tweet or its quoted/parent tweet) — skipping to avoid an out-of-context reply.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -253,7 +335,7 @@ export async function runCatchup(
         if (isQuoteBaitTweet(details.fullText || details.text)) {
           const reason = "quote-tweet engagement bait";
           log(`${label} ${post.url} is quote-tweet engagement bait — skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -266,7 +348,7 @@ export async function runCatchup(
         if (details.parentTweet) {
           const reason = `is a reply to another tweet (${details.parentTweetHandle || "unknown handle"}), not an original post`;
           log(`${label} ${post.url} is a reply to another tweet (${details.parentTweetHandle || "unknown handle"}), not an original post — skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -277,10 +359,10 @@ export async function runCatchup(
         // already-answered content. A plain repost keeps the same underlying
         // id (caught by hasReplied(post.id) above); a quote-tweet is a
         // genuinely new id with no other link back to the original.
-        if (details.quotedTweetId && isPermanentlySkipped(details.quotedTweetId)) {
+        if (details.quotedTweetId && (await isAlreadyHandled(source, details.quotedTweetId)).handled) {
           const reason = `quotes/reposts a tweet already replied to (${details.quotedTweetId})`;
           log(`${label} ${post.url} quotes/reposts a tweet already replied to (${details.quotedTweetId}) — skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -307,7 +389,7 @@ export async function runCatchup(
         if (SKIP_IMAGE_TWEETS && hasMedia && !isTopHandle && source !== "catchup_forex_crypto") {
           const reason = "has media, not a top-priority handle, SKIP_IMAGE_TWEETS is on";
           log(`${label} ${post.url} ${reason} — skipping.`);
-          markReplied(post.id, reason);
+          await recordHandled(source, post.id, reason);
           skipped.push({ url: post.url, reason });
           totalSkippedOther++;
           return;
@@ -328,6 +410,15 @@ export async function runCatchup(
           const reason = decision === "skip" ? "operator chose to skip" : "no response to the decision prompt within the timeout";
           if (decision === "skip") {
             log(`${label} Operator chose to skip ${post.url}.`);
+            // A deliberate "always skip this post" — persist it so it never
+            // comes back up. Previously this only pushed to the in-memory
+            // `skipped` summary for this run and returned, so nothing was
+            // actually recorded anywhere; the very next run (or a resumed
+            // one after Ctrl+C) had no memory of the choice and asked again.
+            // Timeout is left unrecorded on purpose — that's the operator
+            // not being at the keyboard, not a real decision, so it should
+            // get asked again next time they actually are.
+            await recordHandled(source, post.id, reason);
           } else {
             log(`${label} No response for ${post.url} — skipping.`);
           }
@@ -339,7 +430,7 @@ export async function runCatchup(
         if (decision === "myself") {
           const manualResult = await postManualReply(tweetPage, details.handle || cleanHandle);
           if (manualResult.posted) {
-            markReplied(post.id, "posted a manual reply via catch-up");
+            await recordHandled(source, post.id, "posted a manual reply via catch-up");
             try {
               await memoryRepo.saveMemory({
                 id: "",
@@ -355,6 +446,10 @@ export async function runCatchup(
               });
             } catch {}
             totalReplied++;
+            repliesThisHandle++;
+            if (source !== "catchup_forex_crypto") {
+              await recordQuotaReply();
+            }
             log(`${label} Manual reply posted for ${post.url}`);
           } else {
             const reason = "manual reply not posted (declined, or postManualReply failed — see log above)";
@@ -363,6 +458,7 @@ export async function runCatchup(
             totalSkippedOther++;
           }
           await pace();
+          if (source === "catchup_stories" && repliesThisHandle >= maxRepliesThisHandle) return true;
           return;
         }
 
@@ -439,7 +535,7 @@ export async function runCatchup(
         await prepareReply(tweetPage, reply, post.id);
         const posted = await clickReply(tweetPage, details.handle || cleanHandle);
         if (posted) {
-          markReplied(post.id, "posted a ChatGPT-drafted reply via catch-up");
+          await recordHandled(source, post.id, "posted a ChatGPT-drafted reply via catch-up");
           try {
             await memoryRepo.saveMemory({
               id: "",
@@ -455,6 +551,10 @@ export async function runCatchup(
             });
           } catch {}
           totalReplied++;
+          repliesThisHandle++;
+          if (source !== "catchup_forex_crypto") {
+            await recordQuotaReply();
+          }
           log(`${label} Posted reply to ${post.url}`);
         } else {
           const reason = "clickReply did not confirm the post went through";
@@ -463,6 +563,7 @@ export async function runCatchup(
           totalSkippedOther++;
         }
         await pace();
+        if (source === "catchup_stories" && repliesThisHandle >= maxRepliesThisHandle) return true;
 
         // === DISPATCHER-QUEUED VERSION (disconnected for now) ===
         // try {

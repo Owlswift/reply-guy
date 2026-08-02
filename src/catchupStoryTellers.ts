@@ -1,7 +1,13 @@
 import "dotenv/config";
 import { getBrowserAndContext } from "./browser/browser";
 import { getStoryTellerHandles } from "./storage/storyTellerHandles";
-import { getOrStartSession, markSessionHandleDone, clearSession } from "./storage/storyCatchupSession";
+import {
+  getOrStartSession,
+  markSessionHandleDone,
+  clearSession,
+  setLastCatchupStoriesMode,
+} from "./storage/storyCatchupSession";
+import { isPriorityStoryTeller } from "./decision/scoreTweet";
 import { runCatchup } from "./catchup/runCatchup";
 import { log } from "./utils/logger";
 import { playNotificationSound } from "./utils/notify";
@@ -27,14 +33,24 @@ async function main() {
     process.exit(0);
   }
 
-  // Resumable, shuffled session (storage/storyCatchupSession.ts) — if a
-  // previous run got interrupted partway through, this picks up with
-  // whatever handles are still left instead of restarting from the front
-  // of the list every time. Only once every handle in the session has been
-  // processed does the session get cleared, so the NEXT fresh run reshuffles.
-  const handles = await getOrStartSession(allHandles);
-  if (handles.length < allHandles.length) {
-    log(`[Catchup:Stories] Resuming a previous session — ${handles.length}/${allHandles.length} handle(s) remaining.`);
+  // Alternate between a normal session (every handle, 1 reply each) and a
+  // session dedicated solely to PRIORITY_STORY_TELLER_HANDLES
+  // (decision/scoreTweet.ts) — priority handles get a whole extra pass
+  // every other run instead of 2 replies stacked back-to-back in one
+  // sitting, which read as scripted. Falls back to "normal" if there are
+  // no priority handles in the list yet. Resuming an interrupted session
+  // reuses whatever mode THAT session actually started under (tracked by
+  // storyCatchupSession.ts itself) rather than recomputing one here — a
+  // leftover session's real contents must always match the mode it's
+  // reported as running.
+  const priorityHandles = allHandles.filter((h) => isPriorityStoryTeller(h, h));
+  const { handles, mode, resumed } = await getOrStartSession(allHandles, priorityHandles);
+
+  if (mode === "priority_only") {
+    log(`[Catchup:Stories] Priority-only session — ${priorityHandles.length} handle(s).`);
+  }
+  if (resumed) {
+    log(`[Catchup:Stories] Resuming a previous session — ${handles.length} handle(s) remaining.`);
   } else {
     log(`[Catchup:Stories] Starting a fresh session — ${handles.length} handle(s), shuffled.`);
   }
@@ -47,8 +63,11 @@ async function main() {
   });
 
   // Only reached if the run made it through every handle without being
-  // killed — an interrupted run leaves its session behind for next time.
+  // killed — an interrupted run leaves its session behind for next time,
+  // resuming in the same mode it was already running (see
+  // storyCatchupSession.ts's SESSION_MODE_KEY).
   await clearSession();
+  await setLastCatchupStoriesMode(mode);
   log("[Catchup:Stories] Session complete.");
   playNotificationSound();
   process.exit(0);

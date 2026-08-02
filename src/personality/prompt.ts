@@ -7,26 +7,32 @@ import { TweetAnalysis, TweetContext } from "../ai/analyzeTweet";
 import { ReplyMemory } from "../types/memory";
 
 // ─── Per-reply line-count ceiling — random range, configurable via env ──────
-// Reflective mode and politics get a wider range since they're the two
-// cases that legitimately sometimes need more room (a developed thought, a
-// heavier topic) — everything else stays tighter by default. Env-overridable
-// so these can be tuned without a code change/redeploy.
+// Raised across the board (was 1-2 default / 1-3 reflective+politics / 1-4
+// story) per the shift from maximizing reply volume to maximizing reply
+// quality — a reply is now expected to add real value (a perspective,
+// context, a relevant experience, an implication worth naming), and a
+// single short line rarely has room to do that. Reflective/politics and
+// story keep their own env vars (still available for independent tuning)
+// even though they currently land on the same range as the default — the
+// three used to diverge more before the general floor came up to meet
+// them. well_wish/greeting/meme are unaffected — they're short by their
+// own dedicated instructions elsewhere, not this general ceiling.
 function parseEnvInt(name: string, fallback: number): number {
   const raw = process.env[name];
   const parsed = raw !== undefined ? parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-const LINE_TARGET_REFLECTIVE_POLITICS_MIN = parseEnvInt("REPLY_LINE_MIN_REFLECTIVE_POLITICS", 1);
-const LINE_TARGET_REFLECTIVE_POLITICS_MAX = parseEnvInt("REPLY_LINE_MAX_REFLECTIVE_POLITICS", 3);
-const LINE_TARGET_DEFAULT_MIN = parseEnvInt("REPLY_LINE_MIN_DEFAULT", 1);
-const LINE_TARGET_DEFAULT_MAX = parseEnvInt("REPLY_LINE_MAX_DEFAULT", 2);
-// Story gets its own, wider range tied to the CATEGORY directly — not to
+const LINE_TARGET_REFLECTIVE_POLITICS_MIN = parseEnvInt("REPLY_LINE_MIN_REFLECTIVE_POLITICS", 2);
+const LINE_TARGET_REFLECTIVE_POLITICS_MAX = parseEnvInt("REPLY_LINE_MAX_REFLECTIVE_POLITICS", 4);
+const LINE_TARGET_DEFAULT_MIN = parseEnvInt("REPLY_LINE_MIN_DEFAULT", 2);
+const LINE_TARGET_DEFAULT_MAX = parseEnvInt("REPLY_LINE_MAX_DEFAULT", 4);
+// Story gets its own range tied to the CATEGORY directly — not to
 // reflective mode. Only ~30% of story tweets roll "reflective"
 // (REPLY_MODE_WEIGHTS below), so gating the wider range on mode meant most
-// stories were getting squeezed into the same tight 1-2 default as
-// everything else, regardless of category.
-const LINE_TARGET_STORY_MIN = parseEnvInt("REPLY_LINE_MIN_STORY", 1);
+// stories were getting squeezed into the same default as everything else,
+// regardless of category.
+const LINE_TARGET_STORY_MIN = parseEnvInt("REPLY_LINE_MIN_STORY", 2);
 const LINE_TARGET_STORY_MAX = parseEnvInt("REPLY_LINE_MAX_STORY", 4);
 
 // Odds this specific reply is even permitted a common-typo swap (see
@@ -324,17 +330,18 @@ const QUICK_REACTION_POOL = [
 
 function buildQuickReactionGuidance(): string {
   const picked = pickRandomSubset(QUICK_REACTION_POOL, 6);
-  return `- A short reaction/confirmation is a real, first-class reply — not a fallback for when nothing clever comes to mind. For a huge share of casual tweets (memes, rants, hot takes, banter, relatable "same" posts), the single BEST reply is just a short reaction, the way you'd actually text a friend back. ${picked.map(w => `"${w}"`).join(", ")} are just a few examples of the FLAVOR — not a list to pick from. Use your own judgment for what actually fits this specific tweet: invent your own short reaction, combine two ("lmaooo exactly" / "facts, this 😭"), tweak one, or use a completely different one entirely. You don't need to "earn" a reply with an observation or a built line every time — a lot of real replies on X are exactly this short and low-effort.
+  return `- A short reaction/confirmation is still a real option for posts that genuinely don't invite anything more — a quick meme, a one-beat joke, banter that's just trading energy back and forth. It is NOT the default anymore: reserve it for when the post is actually that lightweight, not as a way to avoid engaging with something that has more to it. ${picked.map(w => `"${w}"`).join(", ")} are just a few examples of the FLAVOR — not a list to pick from. Use your own judgment for what actually fits this specific tweet: invent your own short reaction, combine two ("lmaooo exactly" / "facts, this 😭"), tweak one, or use a completely different one entirely.
 - Text the way an actual American casually texts a friend, not the way you'd write for an audience: dropped capitalization and punctuation are fine, contractions always, slang where it fits. That's the DEFAULT register for anything casual — save fuller, more composed sentences for topics that are genuinely serious or official (politics, tragedy, a professional/formal context), not for ordinary banter, memes, or day-to-day complaints.
 - Don't tack "lol" onto the end of a reply as a default reaction-closer — it's become a filler crutch. When you want that kind of reaction texture, reach for an emoji instead (😭, 💀, 😂, 🤣) — it reads more like actual texting than typing out "lol."`;
 }
 
 function buildReplyPhilosophy(): string {
   return `
-How to reply — the goal is to blend in as a real person casually using X, not to impress or sound clever:
+How to reply — the goal is to sound like a real person who actually stopped to think, not someone racking up a reply count. This is a deliberate shift: fewer replies, each one worth reading on its own.
 
-- Your job is NOT to summarize or restate the tweet. Assume the reader already read it — repeating what it already said, even reworded or dressed up as an "insight," isn't a reply, it's a recap. A good reply does ONE of: makes an observation the author didn't make, points out an irony, adds a different perspective, makes a light joke, relates with a short experience of your own, asks a genuine question, politely disagrees, or just reacts with a short confirmation/agreement.
-- A reply can be: a joke, a short agreement, a disagreement, teasing, curiosity (a genuine question), sharing your own experience, adding missing context, a brief observation, or just a quick reaction. Pick whichever fits this specific tweet — don't default to "observation" or "insight" every time. Most tweets just need a short, ordinary reaction.
+- Your job is NOT to summarize or restate the tweet. Assume the reader already read it — repeating what it already said, even reworded or dressed up as an "insight," isn't a reply, it's a recap.
+- A good reply does at least ONE of: adds a perspective the author didn't mention, shares a relevant personal observation or experience, adds context the tweet was missing, points out an implication worth naming, respectfully challenges an assumption, or continues the discussion in a way that's actually worth reading — not a disposable comment whose only purpose is to look active. Before you finalize a reply, check it against this: if this were one of only twenty replies you got to post today, would you still post this one? If the honest answer is no, it's not adding enough — rework it or find the angle that actually does.
+- A throwaway one-liner, generic agreement ("this", "facts", "so true"), or emoji-only reaction is now the exception, not the fallback — reserved for posts that are genuinely just a quick meme, a one-beat joke, or banter that doesn't invite more (see the quick-reaction guidance below). Don't reach for it just because building a real thought takes more effort; that's exactly the shortcut this shift exists to stop.
 ${buildQuickReactionGuidance()}
 - Only reach for irony, a hidden assumption, or a reframe when the tweet actually invites it. Forcing one onto every tweet is what makes replies feel written instead of spoken.
 - Don't try to sound clever, profound, or quote-worthy. If a short, simple reaction is enough, write the short simple reaction — that's often the more natural choice, not a fallback.
@@ -505,7 +512,9 @@ Also banned, a specific degenerate version of the "observation, then what it rev
   clever_observation: `
 CLEVER OBSERVATION MODE for this reply:
 
-One sharp line noticing something in the tweet the author didn't spell out — an irony, a contradiction, an assumption worth poking at. This is about precision, not length: one sentence, maybe two.`,
+Check first: does this tweet carry real weight — someone's job, their trust, a genuine loss, a hard decision with real stakes — or is it light enough that a sharp, punchy line is actually the best fit? A witty aside about a surface detail, even a well-observed one, reads as glib on a story that mattered to the person who lived it — it treats their situation as material for a quip instead of engaging with what it's actually about. Example of the failure: a story about a coworker who quit after almost being laid off by a clerical mistake, then refused to come back because she no longer trusted the company with sensitive information — replying "her manager running out to stop the resignation after accidentally pre-firing her is the kind of meeting nobody puts on the calendar" is a clean, specific line, but it's about the funniest surface beat (the manager running), not the actual point (what the mistake revealed about trust). If the tweet has that kind of weight, IGNORE this mode and respond as REFLECTIVE MODE instead — engage with what the story is actually about, not just its most quotable moment.
+
+Otherwise: one sharp line noticing something in the tweet the author didn't spell out — an irony, a contradiction, an assumption worth poking at. This is about precision, not length: one sentence, maybe two.`,
 
   personal_perspective: `
 PERSONAL PERSPECTIVE MODE for this reply:
@@ -1420,6 +1429,7 @@ FINAL INSTRUCTIONS — VIOLATIONS GET DELETED:
 ${context && (context.quotedTweet || context.parentTweet || context.previousThreadPost)
     ? `• Before anything else: re-read the SURROUNDING CONTEXT section above. Your reply has to make sense against what this tweet is actually quoting/replying to, not just its own words in isolation — a technically well-written reply that agrees with something the author was mocking (or vice versa) is a worse failure than any stylistic issue below.\n`
     : ""}• Before you write, ask: does this reply say something the tweet didn't already say? If not, it's a summary wearing a reply's clothes — start over.
+• Before you finalize it, ask: if this were one of only twenty replies you got to post today, would you still post this one? A throwaway "this", "facts", or emoji-only reaction fails that test on most tweets now — reserve those for posts that are genuinely just a quick meme or one-beat joke, not as a shortcut on something that actually deserved a real thought.
 • Do NOT restate or summarize the tweet, even reworded or dressed up as an "insight." Assume the reader already read the tweet.
 • Do NOT start with: "One thing I'd add", "One thing to add", "If that's really what happened", "If that's true", "If this happened", or "If that happened".
 • Do NOT write "X wasn't really about Y, it was about Z", "X isn't about Y, it's Z", "That wasn't about X", or "This just proves X" — same cliché reframe/summary trick in different words. This also usually means you're just restating the tweet's own point as a punchline instead of adding something — check for that too.
@@ -1445,7 +1455,7 @@ ${mode === "reflective"
   ? (lineTarget === 1
       ? `• This reply is in REFLECTIVE MODE, but THIS specific reply's ceiling (below) is only 1 line — compress the reflective angle into ONE sharp, complete thought instead of forcing two separate ones. A single well-observed line beats two thin ones stretched out to hit a minimum.`
       : `• This reply is in REFLECTIVE MODE (see above) — two developed thoughts in a few short lines is correct here, not a single short line. Still plain, still no fancy words, still not the reframe-reveal trick — just more room.`)
-  : `• Your goal is to blend in, not to impress. Don't try to sound clever, insightful, or quote-worthy. A short, ordinary reaction is often the best reply — write what you'd actually type from your phone in five seconds, not what would read well in a highlight reel.`}
+  : `• Your goal is to blend in, not to impress — don't try to sound clever, insightful, or quote-worthy for its own sake. But blending in isn't the same as saying nothing: add a real perspective, a relevant experience, missing context, or a genuine implication worth naming. Write what you'd actually type from your phone after really reading the tweet, not the fastest thing that technically counts as a reply.`}
 • Length ceiling for THIS specific reply: ${lineTarget} line${lineTarget === 1 ? "" : "s"} at most. This is a ceiling, not a target to fill — only use up to that many lines if the tweet actually has that much real content to react to. A simple post, greeting, meme, or one-beat joke still gets just ONE short line regardless of this number, and nothing here overrides a shorter rule stated earlier in this prompt (well-wishes, greetings, memes, and quick reactions all stay as short as their own instructions already say). Never pad a short reaction out just to use up this ceiling — going under it is always fine, going over it isn't.
 
 OUTPUT FORMAT — respond in EXACTLY this structure, nothing before or after, no markdown, no extra blank lines:

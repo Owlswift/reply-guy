@@ -7,19 +7,28 @@ import { TweetCategory } from "../types/analysis";
  * commenting vary a lot by what kind of post it is — people almost always
  * weigh in on a direct question, but often just scroll past a meme, a vague
  * opinion take, or a news post without saying anything.
+ *
+ * Retuned per the shift from maximizing reply volume to maximizing reply
+ * quality — priority given to story threads, politics/current affairs,
+ * opinion/advice posts that invite real discussion, and
+ * career/business/educational content; odds lowered for categories that
+ * mostly invite a disposable reaction (meme, general chatter, sports) —
+ * this is a secondary layer on top of the hard hourly reply cap
+ * (storage/hourlyReplyQuota.ts), which does most of the actual
+ * volume-limiting now.
  */
 const REPLY_PROBABILITY: Record<TweetCategory, number> = {
   question: 0.9,
-  story: 0.75,
-  advice: 0.7,
-  career: 0.65,
-  humor: 0.65,
-  opinion: 0.55,
-  politics: 0.55,
-  meme: 0.5,
+  story: 0.85,
+  politics: 0.8,
+  opinion: 0.75,
+  advice: 0.75,
+  career: 0.7,
   news: 0.5,
-  sports: 0.5,
-  general: 0.5,
+  humor: 0.4,
+  sports: 0.4,
+  general: 0.35,
+  meme: 0.3,
   // well_wish/greeting never actually reach this gate — main-interactive.ts
   // routes them to the manual-reply special case first. Included for
   // completeness/type-safety only.

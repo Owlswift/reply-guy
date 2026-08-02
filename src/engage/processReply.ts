@@ -60,6 +60,12 @@ const AGREEMENT_REACTIONS = [
   "fr",
   "true that",
   "yea",
+  "no cap",
+  "real talk",
+  "this",
+  "say less",
+  "word",
+  "100%",
 ];
 
 // PRAISE / THANK_YOU — they complimented the post or thanked Echo for it.
@@ -71,6 +77,10 @@ const APPRECIATION_REACTIONS = [
   "appreciate that",
   "means a lot",
   "🙏",
+  "glad it landed",
+  "appreciate the kind words",
+  "means a lot, thank you",
+  "thanks for reading",
 ];
 
 // WELL_WISH / GREETINGS — "Happy Friday", "have a great one", "hey" — the
@@ -81,16 +91,111 @@ const RECIPROCAL_REACTIONS = [
   "right back at you",
   "appreciate it, you too",
   "same here, thanks",
+  "you as well",
+  "wishing you the same",
+  "likewise",
+  "hope yours is just as good",
+  "same energy right back",
 ];
 
-export function pickClosingReaction(replyClass?: ReplyClass): string {
-  const pool =
+type ReactionPool = "agreement" | "appreciation" | "reciprocal";
+
+// Which phrase was picked most recently per pool, in this run — kept full
+// except for whichever one is currently excluded, so back-to-back repeats
+// can't happen even when the model classifies several replies in a row the
+// same way (the exact case that produced three identical "same here,
+// thanks" reactions in one thread).
+const recentlyUsed = new Map<ReactionPool, string[]>();
+
+function pickVaried(poolKey: ReactionPool, pool: string[]): string {
+  const used = recentlyUsed.get(poolKey) ?? [];
+  const available = pool.filter((p) => !used.includes(p));
+  const choices = available.length > 0 ? available : pool;
+  const choice = choices[Math.floor(Math.random() * choices.length)]!;
+
+  recentlyUsed.set(poolKey, [choice, ...used].slice(0, pool.length - 1));
+  return choice;
+}
+
+// Last-resort fallback only now (LLM unreachable or every attempt failed
+// validation/dedup) — see generateClosingReaction below for the real path.
+function pickClosingReaction(replyClass?: ReplyClass): string {
+  if (replyClass === "PRAISE" || replyClass === "THANK_YOU") {
+    return pickVaried("appreciation", APPRECIATION_REACTIONS);
+  }
+  if (replyClass === "WELL_WISH" || replyClass === "GREETINGS") {
+    return pickVaried("reciprocal", RECIPROCAL_REACTIONS);
+  }
+  return pickVaried("agreement", AGREEMENT_REACTIONS);
+}
+
+function buildClosingReactionPrompt(params: {
+  replyClass: ReplyClass;
+  rootTweetText: string;
+  replyText: string;
+  authorHandle: string;
+}): string {
+  const { replyClass, rootTweetText, replyText, authorHandle } = params;
+
+  const situation =
     replyClass === "PRAISE" || replyClass === "THANK_YOU"
-      ? APPRECIATION_REACTIONS
+      ? "They complimented your post or thanked you for it."
       : replyClass === "WELL_WISH" || replyClass === "GREETINGS"
-      ? RECIPROCAL_REACTIONS
-      : AGREEMENT_REACTIONS;
-  return pool[Math.floor(Math.random() * pool.length)]!;
+      ? "They wished you well or greeted you."
+      : "They agreed with / co-signed what you said, without adding anything new.";
+
+  return `You're replying on X to a comment on your own tweet. This doesn't need a full response — just a short, genuine acknowledgment, the way you'd text someone back in a few words.
+
+Your tweet: "${rootTweetText}"
+${authorHandle}'s comment: "${replyText}"
+
+${situation}
+
+Write ONE short line back to them. Reference something specific from what they actually said if there's anything worth referencing — don't default to a generic "thanks" or "same to you" with nothing behind it. Keep it brief (well under a full sentence is fine), casual, no hashtags, no em dashes.
+
+Respond with ONLY the line to post, nothing else.`;
+}
+
+// The real path — a short, content-aware line instead of a canned phrase.
+// Uses the local Ollama model (same as classifyReply.ts/shouldLikeTweet.ts)
+// rather than ChatGPTClient's browser round-trip — this is a one-line
+// acknowledgment, not a substantive reply, so it doesn't need the
+// heavier/slower path the REPLY branch above uses. Falls back to the
+// static pools (pickClosingReaction) only if Ollama's unreachable or
+// nothing clears validation/dedup.
+const OLLAMA_URL = "http://localhost:11434/api/generate";
+
+async function generateClosingReaction(
+  params: { replyClass: ReplyClass; rootTweetText: string; replyText: string; authorHandle: string }
+): Promise<string> {
+  const prompt = buildClosingReactionPrompt(params);
+
+  for (let i = 0; i < 2; i++) {
+    try {
+      const response = await fetch(OLLAMA_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-oss:20b",
+          stream: false,
+          prompt,
+          options: { temperature: 0.7, top_p: 0.9 },
+        }),
+      });
+      const data = (await response.json()) as { response: string };
+      // Strip stray wrapping quotes — small models often echo the "write
+      // ONLY the line" instruction back with the line quoted.
+      const raw = data.response.trim().replace(/^["']|["']$/g, "");
+      if (validateReply(raw) && !isDuplicate(raw)) {
+        return raw;
+      }
+    } catch (err) {
+      log(`[Engage] Closing-reaction generation attempt ${i + 1} failed: ${err}`);
+    }
+  }
+
+  log(`[Engage] Falling back to a canned closing reaction for ${params.authorHandle}.`);
+  return pickClosingReaction(params.replyClass);
 }
 
 /**
@@ -113,7 +218,12 @@ export async function postClosingReaction(params: {
   const { browserContext, threadData, reply, echoHandle, replyClass } = params;
   const replyPermalink = `https://x.com/${reply.authorHandle.replace(/^@/, "")}/status/${reply.id}`;
   const replyPage = params.page ?? await browserContext.newPage();
-  const reaction = pickClosingReaction(replyClass);
+  const reaction = await generateClosingReaction({
+    replyClass,
+    rootTweetText: threadData.rootTweetText,
+    replyText: reply.text,
+    authorHandle: reply.authorHandle,
+  });
 
   try {
     if (!params.page) {

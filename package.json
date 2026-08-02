@@ -14,6 +14,7 @@
     "catchup:priority": "tsx src/catchupPriorityHandles.ts",
     "catchup:stories": "tsx src/catchupStoryTellers.ts",
     "catchup:forex-crypto": "tsx src/catchupForexCrypto.ts",
+    "start:search": "tsx src/startSearch.ts",
     "ensure-running": "bash scripts/ensure-running.sh",
     "setup": "bash scripts/setup.sh",
     "build": "tsc",

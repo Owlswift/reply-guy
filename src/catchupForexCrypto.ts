@@ -19,6 +19,11 @@ import { playNotificationSound } from "./utils/notify";
 // decisionTimeoutMs/decisionTimeoutFallback options.
 const DECISION_TIMEOUT_MS = 10_000;
 
+// Shorter lookback than runCatchup.ts's 15h default — forex/crypto content
+// ages out fast (a trade call from yesterday isn't worth replying to
+// today), so this scans only the last 10h per handle.
+const MAX_AGE_MS = 10 * 60 * 60 * 1000;
+
 async function main() {
   const allHandles = await getForexCryptoHandles();
 
@@ -40,7 +45,7 @@ async function main() {
   }
 
   const { context } = await getBrowserAndContext();
-  await runCatchup(context, handles, "[Catchup:ForexCrypto]", "catchup_forex_crypto", undefined, {
+  await runCatchup(context, handles, "[Catchup:ForexCrypto]", "catchup_forex_crypto", MAX_AGE_MS, {
     decisionTimeoutMs: DECISION_TIMEOUT_MS,
     decisionTimeoutFallback: "chatgpt",
     onHandleDone: (handle) => markSessionHandleDone(handle),

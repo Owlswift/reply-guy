@@ -122,11 +122,16 @@ async function readArticle(article: ReturnType<Page["locator"]>) {
 
   let text = "";
   try {
+    // innerText, not textContent — X renders a tweet's manual line breaks
+    // as <br> elements, and textContent silently drops them (no \n
+    // inserted), collapsing a multi-line story into one run-on string
+    // before it ever reaches ChatGPT. innerText is layout-aware and
+    // preserves them, matching what's actually displayed.
     text =
       (await article
         .locator('[data-testid="tweetText"]')
         .first()
-        .textContent({ timeout: 2000 }))?.trim() ?? "";
+        .innerText({ timeout: 2000 }))?.trim() ?? "";
   } catch {
     // No text (e.g. image-only tweet) — still a valid article, just no text to collect.
   }
@@ -188,7 +193,10 @@ async function readQuotedTweet(
     const quoteAuthor = (await nameNodes[1]?.textContent({ timeout: 2000 }))?.trim() ?? "";
     const quoteHandle = quoteAuthor.match(/@\w+/)?.[0] ?? "";
 
-    const quoteText = (await textNodes[1]?.textContent({ timeout: 2000 }))?.trim() ?? "";
+    // innerText, not textContent — see readArticle's own text extraction
+    // above for why (X's manual line breaks are <br> elements, which
+    // textContent silently drops).
+    const quoteText = (await textNodes[1]?.innerText({ timeout: 2000 }))?.trim() ?? "";
     if (!quoteText) return undefined;
 
     // Quote card's own status id — same distinguishing logic readArticle

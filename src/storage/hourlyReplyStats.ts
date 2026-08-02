@@ -12,7 +12,10 @@ import { getRedisClient } from "./redis";
  */
 const REDIS_KEY = "echo:replies_per_hour";
 
-function hourKey(date: Date = new Date()): string {
+// Exported so storage/hourlyReplyQuota.ts buckets hours identically —
+// two independent hour-bucketing schemes could drift apart at the
+// boundary otherwise.
+export function hourKey(date: Date = new Date()): string {
   return date.toISOString().slice(0, 13); // e.g. "2026-07-24T10"
 }
 

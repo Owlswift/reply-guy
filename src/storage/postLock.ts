@@ -33,7 +33,7 @@ const LOCK_TTL_MS = 30_000;
 
 // Minimum gap enforced between one process finishing a post and the next
 // one (anywhere) starting its own.
-const POST_COOLDOWN_MS = 10_000;
+const POST_COOLDOWN_MS = 20_000;
 
 const POLL_INTERVAL_MS = 1_000;
 

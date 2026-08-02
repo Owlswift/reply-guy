@@ -328,11 +328,14 @@ async function extractArticleAuthorAndText(
     const handle = authorText.match(/@(\w+)/)?.[0] ?? "";
     const author = (authorText.split("@")[0] ?? "").trim();
 
+    // innerText, not textContent — X renders manual line breaks as <br>
+    // elements, which textContent silently drops (extractTweet.ts's
+    // readArticle has the full explanation).
     const text =
       (await article
         .locator('[data-testid="tweetText"]')
         .first()
-        .textContent({ timeout: 5000 }))?.trim() ?? "";
+        .innerText({ timeout: 5000 }))?.trim() ?? "";
 
     return { author, handle, text };
   } catch {
@@ -524,12 +527,14 @@ async function extractSingleReply(
   const handle = authorText.match(/@(\w+)/)?.[0] ?? "";
   const authorName = (authorText.split("@")[0] ?? "").trim();
 
-  // Get text
+  // Get text — innerText, not textContent (see extractTweet.ts's
+  // readArticle for why: X's manual line breaks are <br> elements, which
+  // textContent silently drops).
   const text =
     (await article
       .locator('[data-testid="tweetText"]')
       .first()
-      .textContent({ timeout: 3000 })
+      .innerText({ timeout: 3000 })
       .catch(() => ""))?.trim() ?? "";
 
   if (!text && !handle) return null;

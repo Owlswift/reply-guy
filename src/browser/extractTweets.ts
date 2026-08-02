@@ -89,8 +89,13 @@ export async function extractTweets(
             const author =
                 article.querySelector('[data-testid="User-Name"]')?.textContent?.trim() ?? "";
 
+            // innerText, not textContent — X renders a tweet's manual line
+            // breaks as <br> elements, and textContent silently drops them
+            // (no \n inserted), collapsing a multi-line story into one
+            // run-on string. innerText is layout-aware and preserves them,
+            // matching what a person actually sees on the card.
             const text =
-                article.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? "";
+                (article.querySelector('[data-testid="tweetText"]') as any)?.innerText?.trim() ?? "";
 
             const anchor = article.querySelector('a[href*="/status/"]');
 

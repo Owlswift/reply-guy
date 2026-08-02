@@ -54,7 +54,10 @@ async function readArticle(article: ReturnType<Page["locator"]>): Promise<Articl
     const anchor = el.querySelector('a[href*="/status/"]');
     const href = anchor?.getAttribute("href") ?? "";
     const idMatch = href.match(/status\/(\d+)/);
-    const text = el.querySelector('[data-testid="tweetText"]')?.textContent?.trim() ?? "";
+    // innerText, not textContent — X renders manual line breaks as <br>
+    // elements, which textContent silently drops (extractTweet.ts's
+    // readArticle has the full explanation).
+    const text = el.querySelector('[data-testid="tweetText"]')?.innerText?.trim() ?? "";
 
     // This tweet's own <time>, not a nested quote-tweet's — same
     // role="link" heuristic as extractTweet.ts (an <a role="link">
@@ -119,8 +122,15 @@ interface ScanOptions {
  * what lets a caller open and fully handle each post immediately instead
  * of collecting a batch and processing it afterward (see
  * scanProfileWithinWindow).
+ *
+ * Returning `true` stops the scan for this handle right here — the rest of
+ * the window's posts for this same handle are never even opened. Used by
+ * runCatchup.ts's catchup_stories path to reply to at most one post per
+ * handle instead of every qualifying post in the window. Returning
+ * `undefined`/void (every other caller) continues scanning as before —
+ * additive, not a breaking change.
  */
-type OnOriginalPost = (post: ProfileOriginalTweet) => Promise<void>;
+type OnOriginalPost = (post: ProfileOriginalTweet) => Promise<void | true>;
 
 async function scanProfile(
   page: Page,
@@ -183,12 +193,16 @@ async function scanProfile(
           (!info.datetime || Date.now() - new Date(info.datetime).getTime() > options.maxAgeMs);
 
         if (!pinnedTooOld) {
-          await onOriginalPost({
+          const result = await onOriginalPost({
             id: info.id,
             url: info.href.startsWith("http") ? info.href : `https://x.com${info.href.split("?")[0]}`,
             text: info.text,
             author: `@${handle}`,
           });
+          if (result === true) {
+            stop = true;
+            break;
+          }
         }
       }
 

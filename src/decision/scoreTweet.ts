@@ -21,7 +21,6 @@ function normalizeHandle(value: string): string {
  */
 const PRIORITY_HANDLES: string[] = [
   // Add handles here e.g. "elonmusk", "fabrizioromano"
-  "@EricLDaugh",
   "@Read_Meee",
   "@KAHALA123Y",
   "@wak2433",
@@ -85,7 +84,8 @@ export const TOP_PRIORITY_HANDLES: string[] = [
   "@ceraliza",
   "@luv1bun",
   "@qoyyrazalq",
-  "@cyberfeeIs"
+  "@cyberfeeIs",
+  "EricLDaugh"
 ];
 
 const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always ranks first
@@ -326,6 +326,40 @@ export function isTopPriority(author: string, username: string): boolean {
   const normalized = normalizeHandle(author);
   const normalizedUser = normalizeHandle(username);
   return TOP_PRIORITY_HANDLES.some(
+    h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
+  );
+}
+
+/**
+ * Priority story tellers — catchup/runCatchup.ts normally replies to at
+ * most one post per handle per catchup_stories run (so the shared hourly
+ * budget spreads across more distinct handles instead of one handle's
+ * whole backlog). These handles are the exception: reply to up to 2 of
+ * their posts in succession before moving to the next handle. Distinct
+ * from PRIORITY_HANDLES above (that one affects queue scoring in
+ * main-interactive.ts) — this only affects catchup_stories' per-handle
+ * reply cap.
+ */
+export const PRIORITY_STORY_TELLER_HANDLES: string[] = [
+  "@lovyPrimzy1",
+  "@WrittenBy_SS",
+  "@ChelfcAbby",
+  "@MegOfficiall",
+  "@lizzkelly7",
+  "@raixdaily",
+  "@Anathenumberone",
+  "@katyakayy",
+  "@beemyli",
+  "@KeruboSk",
+  "@Read_Meee",
+  "@GOLDBABYO",
+  "@KAHALA123Y"
+];
+
+export function isPriorityStoryTeller(author: string, username: string): boolean {
+  const normalized = normalizeHandle(author);
+  const normalizedUser = normalizeHandle(username);
+  return PRIORITY_STORY_TELLER_HANDLES.some(
     h => normalized === normalizeHandle(h) || normalizedUser === normalizeHandle(h)
   );
 }

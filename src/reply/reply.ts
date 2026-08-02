@@ -64,6 +64,13 @@ export async function clickReply(
   // postManualReply.ts) funnels through this one function, so recording the
   // hourly count here — instead of at each caller individually — is what
   // makes storage/hourlyReplyStats.ts an accurate total across all of them.
+  // Deliberately NOT storage/hourlyReplyQuota.ts's recordQuotaReply() —
+  // that one is quota-specific bookkeeping, only called explicitly from
+  // the scripts that actually opt into the hourly quota
+  // (main-interactive.ts, catchup/runCatchup.ts). Calling it here would
+  // make it universal again, which is exactly the bug that let
+  // notifications.ts/engage.ts posts silently eat into another script's
+  // quota budget despite never waiting for it.
   if (success) {
     await recordReplyForHour().catch(() => {});
   }

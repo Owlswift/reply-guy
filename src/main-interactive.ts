@@ -13,6 +13,7 @@ import { hasUrlBeenReplied, markUrlReplied } from "./storage/repliedUrls";
 import { scoreTweet, shouldSkipDueToAgeAndReplies, isStaleByAgeAndReplies, isUrgent, isPriority, isLowPriority, isBlockedHandle, isReviewHandle, isTopPriority } from "./decision/scoreTweet";
 import { flagPostForReview } from "./storage/flaggedPosts";
 import { recordForexCryptoHandle } from "./storage/forexCryptoHandles";
+import { waitForReplyTurn, recordQuotaReply } from "./storage/hourlyReplyQuota";
 import { isForexOrCrypto } from "./decision/forexCryptoDetection";
 import { isBlockedQuotedTweet } from "./decision/blockedQuotedTweets";
 import { isBlockedTweetId } from "./decision/blockedTweetIds";
@@ -361,6 +362,7 @@ async function finalizeManualReply(
   markReplied(item.id, "posted a manual reply");
   markNotificationReplied(item.id);
   stats.posted++;
+  await recordQuotaReply();
   await markUrlReplied(item.url).catch(() => {});
   try {
     const { MemoryRepository } = await import("./database/MemoryRepository");
@@ -496,6 +498,15 @@ async function main() {
   }
 
   while (stats.posted < DAILY_LIMIT) {
+    // Global hourly reply budget (storage/hourlyReplyQuota.ts) — shared
+    // across every script, not just this one. Pauses the whole cycle (no
+    // watching, no scrolling) until the next hour once this hour's random
+    // 6-12 target is reached, AND paces between individual replies the
+    // rest of the time so the budget actually spreads across the hour
+    // instead of firing back-to-back — deliberate shift from maximizing
+    // reply volume to maximizing reply quality.
+    await waitForReplyTurn("[MainInteractive]");
+
     // ============================================================
     // PHASE 1: WATCH NOTIFICATIONS
     // ============================================================
@@ -1552,6 +1563,7 @@ async function main() {
           dequeue();
           if (posted) {
             stats.posted++;
+            await recordQuotaReply();
             await markUrlReplied(item.url).catch(() => {});
             try {
               const { MemoryRepository } = await import("./database/MemoryRepository");
@@ -1655,6 +1667,7 @@ async function main() {
           dequeue();
           if (posted) {
             stats.posted++;
+            await recordQuotaReply();
             await markUrlReplied(item.url).catch(() => {});
             try {
               const { MemoryRepository } = await import("./database/MemoryRepository");

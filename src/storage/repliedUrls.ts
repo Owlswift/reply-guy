@@ -17,11 +17,21 @@ import { getRedisClient } from "./redis";
  * Redis has no such per-process caching problem — every check/write goes
  * to the shared server directly, so two processes (or two runs, restarted
  * moments apart) always see the same, current state.
+ *
+ * 24h TTL, refreshed on every write — Redis has no per-member expiry for a
+ * SET, only per-key, so this is a sliding window on the whole set rather
+ * than each URL individually expiring 24h after its own addition. Fine for
+ * what this guards against (replying to the same post twice within the
+ * same run or a near-concurrent restart) — it just stops the set from
+ * growing forever.
  */
 const REDIS_KEY = "echo:replied_urls";
+const TTL_SECONDS = 24 * 60 * 60;
 
 export async function markUrlReplied(url: string): Promise<void> {
-  await getRedisClient().sadd(REDIS_KEY, url);
+  const client = getRedisClient();
+  await client.sadd(REDIS_KEY, url);
+  await client.expire(REDIS_KEY, TTL_SECONDS);
 }
 
 export async function hasUrlBeenReplied(url: string): Promise<boolean> {
