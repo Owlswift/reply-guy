@@ -4,7 +4,7 @@ import { log } from "../utils/logger";
 
 /**
  * A hard reply budget for the current hour, spread across it — the
- * mechanism behind the "6-12 replies/hour, randomized, spaced
+ * mechanism behind the "1-3 replies/hour, randomized, spaced
  * unpredictably, no fixed cadence" policy. Shared across the scripts that
  * actually opt into it (main-interactive.ts, catchup:priority,
  * catchup:stories) — deliberately NOT notifications.ts/engage.ts (reply to
@@ -23,8 +23,8 @@ import { log } from "../utils/logger";
  * clickReply() — unlike recordReplyForHour(), it isn't universal.
  */
 
-const MIN_PER_HOUR = 6;
-const MAX_PER_HOUR = 12;
+const MIN_PER_HOUR = 3;
+const MAX_PER_HOUR = 6;
 const TARGET_KEY_PREFIX = "echo:hourly_reply_target:";
 const QUOTA_COUNT_KEY = "echo:quota_replies_per_hour";
 const LAST_REPLY_AT_KEY = "echo:quota_last_reply_at";
@@ -90,6 +90,21 @@ async function getQuotaReplyCount(): Promise<number> {
   return count ? parseInt(count, 10) || 0 : 0;
 }
 
+/**
+ * Full history of the QUOTA-specific counter, oldest first — unlike
+ * hourlyReplyStats.ts's getReplyCountsPerHour() (every script, unpaced
+ * scripts included), this only reflects main-interactive.ts/
+ * catchup:priority/catchup:stories, i.e. the scripts that actually wait on
+ * waitForReplyTurn(). This is the number that should actually stay within
+ * MIN_PER_HOUR-MAX_PER_HOUR each hour.
+ */
+export async function getQuotaReplyCountsPerHour(): Promise<Array<{ hour: string; count: number }>> {
+  const all = await getRedisClient().hgetall(QUOTA_COUNT_KEY);
+  return Object.entries(all)
+    .map(([hour, count]) => ({ hour, count: parseInt(count, 10) || 0 }))
+    .sort((a, b) => a.hour.localeCompare(b.hour));
+}
+
 async function msSinceLastReply(): Promise<number | null> {
   const raw = await getRedisClient().get(LAST_REPLY_AT_KEY).catch(() => null);
   if (!raw) return null;
@@ -153,6 +168,11 @@ export async function waitForReplyTurn(label: string): Promise<void> {
       continue; // recompute — count/timing may have moved while waiting
     }
 
+    // Reached whenever no wait is actually needed (enough time already
+    // passed since the last reply anywhere) — previously this returned
+    // silently, so a run could go through several posts with zero visible
+    // indication of the hour's target/count/remaining at all.
+    log(`${label} Hourly quota: ${count}/${target} posted this hour, ${remaining} remaining — proceeding.`);
     return;
   }
 }

@@ -40,3 +40,17 @@ export async function getStoryTellerHandles(): Promise<string[]> {
   const handles = await getRedisClient().smembers(REDIS_KEY);
   return handles.filter(h => h.trim().length > 0);
 }
+
+/**
+ * Is this handle a known story teller? Used by reply/reply.ts's clickReply()
+ * to decide whether a successful reply should also bump the daily per-handle
+ * reply log (storage/dailyStoryTellerReplyStats.ts). Normalizes the same way
+ * recordStoryTeller() does (strip leading @, lowercase) so a caller passing
+ * "@WrittenBy_SS" and one passing "writtenby_ss" agree on the same answer.
+ */
+export async function isStoryTeller(handle: string): Promise<boolean> {
+  const normalized = handle.replace(/^@/, "").toLowerCase();
+  if (!normalized) return false;
+  const result = await getRedisClient().sismember(REDIS_KEY, normalized);
+  return result === 1;
+}

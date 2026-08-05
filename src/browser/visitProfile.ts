@@ -17,11 +17,12 @@ export interface ProfileVisitResult {
 // this many originals since the last check, we just take the newest ones
 // and move on.
 //
-// Reposts and pinned tweets don't count toward "found" or advance the
-// cursor, but they DO consume scan slots — a heavy reposter can put a
-// dozen+ reposts in a row before their next original post. Verified
-// live: one tracked account had 15 consecutive reposts before her next
-// original story. 25 gives real margin above that.
+// Reposts of someone ELSE's content (self-reposts are exempt — see
+// isSelfRepost below) don't count toward "found" or advance the cursor,
+// but they DO consume scan slots — a heavy reposter can put a dozen+
+// reposts in a row before their next original post. Verified live: one
+// tracked account had 15 consecutive reposts before her next original
+// story. 25 gives real margin above that.
 const MAX_ARTICLES_TO_SCAN = 25;
 
 // X virtualizes the profile timeline — only articles near the current
@@ -37,6 +38,7 @@ const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 interface ArticleInfo {
   isRepost: boolean;
+  isSelfRepost: boolean;
   isPinned: boolean;
   isReply: boolean;
   href: string;
@@ -45,12 +47,26 @@ interface ArticleInfo {
   datetime: string | null;
 }
 
-async function readArticle(article: ReturnType<Page["locator"]>): Promise<ArticleInfo> {
-  return article.evaluate((el: any) => {
+async function readArticle(article: ReturnType<Page["locator"]>, handle: string): Promise<ArticleInfo> {
+  return article.evaluate((el: any, profileHandle: string) => {
     const socialContext = (el.querySelector('[data-testid="socialContext"]')?.textContent ?? "").toLowerCase();
     const isRepost = socialContext.includes("repost");
     const isPinned = socialContext.includes("pinned");
     const isReply = (el.textContent ?? "").trim().startsWith("Replying to");
+
+    // Reposting your OWN earlier post isn't "sharing someone else's
+    // content" — it's still your own activity, same reasoning as
+    // main-interactive.ts's isSelfRepost. The card's byline
+    // ([data-testid="User-Name"]) reflects the ORIGINAL tweet's author,
+    // separate from the "X reposted" line above it — since we're on
+    // `profileHandle`'s own profile, the reposter is always them, so this
+    // is a self-repost exactly when the byline handle matches the profile
+    // we're scanning.
+    const authorText = el.querySelector('[data-testid="User-Name"]')?.textContent ?? "";
+    const authorHandleMatch = authorText.match(/@\w+/);
+    const authorHandle = (authorHandleMatch?.[0] ?? "").replace(/^@/, "").toLowerCase();
+    const isSelfRepost = isRepost && authorHandle === profileHandle.toLowerCase();
+
     const anchor = el.querySelector('a[href*="/status/"]');
     const href = anchor?.getAttribute("href") ?? "";
     const idMatch = href.match(/status\/(\d+)/);
@@ -82,8 +98,8 @@ async function readArticle(article: ReturnType<Page["locator"]>): Promise<Articl
     }
     if (!datetime) datetime = times[0]?.getAttribute("datetime") ?? null;
 
-    return { isRepost, isPinned, isReply, href, id: idMatch?.[1] ?? null, text, datetime };
-  });
+    return { isRepost, isSelfRepost, isPinned, isReply, href, id: idMatch?.[1] ?? null, text, datetime };
+  }, handle);
 }
 
 interface ScanOptions {
@@ -160,12 +176,15 @@ async function scanProfile(
     for (const article of articles) {
       if (stop) break;
 
-      const info = await readArticle(article);
+      const info = await readArticle(article, handle);
       if (!info.id || seenIds.has(info.id)) continue;
       seenIds.add(info.id);
       scannedCount++;
 
-      const isChronological = !info.isPinned && !info.isRepost;
+      // A self-repost counts as this account's own content, not "sharing
+      // someone else's post" — only a repost of someone ELSE's tweet stays
+      // excluded below.
+      const isChronological = !info.isPinned && (!info.isRepost || info.isSelfRepost);
 
       if (isChronological) {
         if (newestTweetId === null) {
@@ -184,7 +203,7 @@ async function scanProfile(
         }
       }
 
-      if (!info.isRepost && !info.isReply && info.text) {
+      if ((!info.isRepost || info.isSelfRepost) && !info.isReply && info.text) {
         // Pinned tweets are judged on their own merits (just the age
         // check) instead of being unconditionally skipped — a pin can be
         // a genuinely fresh post the author wants visible.

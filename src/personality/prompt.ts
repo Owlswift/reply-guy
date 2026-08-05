@@ -392,8 +392,21 @@ const REPLY_MODE_WEIGHTS: Array<[ReplyMode, number]> = [
   ["question", 0.10],
 ];
 
-function pickReplyMode(exclude: ReplyMode[] = []): ReplyMode {
-  const pool = REPLY_MODE_WEIGHTS.filter(([mode]) => !exclude.includes(mode));
+// Stories get their own, more analytical/reflective/emotional rotation —
+// reflective + personal_perspective (the two modes actually built to sit
+// with a story and draw something out of it) now make up 80% combined,
+// up from 50% in the general table. clever_observation and light_humor
+// are both halved rather than removed — "reduce the humor," not eliminate
+// it outright for every single story regardless of tone.
+const STORY_REPLY_MODE_WEIGHTS: Array<[ReplyMode, number]> = [
+  ["reflective", 0.50],
+  ["personal_perspective", 0.30],
+  ["clever_observation", 0.15],
+  ["light_humor", 0.05],
+];
+
+function pickReplyMode(exclude: ReplyMode[] = [], weights: Array<[ReplyMode, number]> = REPLY_MODE_WEIGHTS): ReplyMode {
+  const pool = weights.filter(([mode]) => !exclude.includes(mode));
   const totalWeight = pool.reduce((sum, [, weight]) => sum + weight, 0);
   const r = Math.random() * totalWeight;
   let cumulative = 0;
@@ -1368,7 +1381,9 @@ export function buildPersonalityPrompt(
     ...(normalized === "story" ? (["question"] as ReplyMode[]) : []),
     ...(isOneLiner ? (["reflective"] as ReplyMode[]) : []),
   ];
-  const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized) ? pickReplyMode(excludedModes) : null;
+  const mode: ReplyMode | null = MODE_ELIGIBLE_CATEGORIES.includes(normalized)
+    ? pickReplyMode(excludedModes, normalized === "story" ? STORY_REPLY_MODE_WEIGHTS : REPLY_MODE_WEIGHTS)
+    : null;
   const modeBlock = mode ? `\n${REPLY_MODE_BLOCKS[mode]}\n` : "";
 
   // Vocabulary/formality rule — politics is the one category allowed to read

@@ -97,15 +97,20 @@ const TOP_PRIORITY_BONUS = 1_000_000; // dwarfs URGENT_BONUS so this always rank
  * (top-priority, urgent, everything else) is completely empty.
  */
 export const LOW_PRIORITY_HANDLES: string[] = [
+  "our_softcake",
+  
   //   "@brotherhood__33",
   // "@O1Txtx",
   // "@FablosJanny",
   // "@cyrilhustle",
-  // "@Medally07",
-  // "@EniolaFunmii",
-  // "@Betty_homz",
-  // "@otspiccy",
-  // "@otuene_claude",
+  "@Medally07",
+  "@EniolaFunmii",
+  "@Betty_homz",
+  "@otspiccy",
+  "@otuene_claude",
+  "@realmfpriya",
+  "@PsicoterapiaMSC",
+  "@Squeeze1i"
   // "@RiddleSphere",
   // "@theglobalZinny",
   // "@J_I_Khalifa",

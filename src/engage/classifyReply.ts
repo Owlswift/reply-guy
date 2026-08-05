@@ -1,4 +1,5 @@
 import { ReplyClass, ReplyClassification, EngagementDecision } from "./types";
+import { isConversationCloser } from "../decision/conversationClosers";
 
 /**
  * Classify a reply using the local LLM (Ollama).
@@ -18,7 +19,7 @@ apart from a reply that only shares some words with the original by coincidence.
 
 Output ONLY valid JSON with these fields:
 {
-  "replyClass": "QUESTION" | "GREETINGS" | "WELL_WISH" | "DISAGREEMENT" | "AGREEMENT" | "JOKE" | "SHARING_EXPERIENCE" | "FOLLOW_UP" | "PRAISE" | "CRITICISM" | "THANK_YOU" | "SPAM" | "BOT" | "EMOJI_ONLY" | "TAGGING_FRIEND" | "MISUNDERSTANDING",
+  "replyClass": "QUESTION" | "GREETINGS" | "WELL_WISH" | "DISAGREEMENT" | "AGREEMENT" | "CONVERSATION_CLOSER" | "JOKE" | "SHARING_EXPERIENCE" | "FOLLOW_UP" | "PRAISE" | "CRITICISM" | "THANK_YOU" | "SPAM" | "BOT" | "EMOJI_ONLY" | "TAGGING_FRIEND" | "MISUNDERSTANDING",
   "engagementDecision": "IGNORE" | "LIKE_ONLY" | "REPLY" | "REPLY_AND_LIKE" | "END_CONVERSATION",
   "reason": "brief explanation"
 }
@@ -30,6 +31,7 @@ GREETINGS: "hey", "hello", "what's up" → REPLY
 WELL_WISH: "good luck", "congrats" → LIKE_ONLY
 DISAGREEMENT: pushes back on the content → REPLY
 AGREEMENT: simple "agree" or "facts", OR a longer sentence that just restates/paraphrases the original post's own point in different words without adding any new angle, detail, or information → END_CONVERSATION
+CONVERSATION_CLOSER: a SHORT (a few words max) pure acknowledgment like "fr", "exactly", "yes", "ok", "facts", "true", "same", "this", "lmao" — something that closes the conversation with zero new content and zero invitation to continue. This is DIFFERENT from AGREEMENT: agree/restate is still a full-ish sentiment; a conversation closer is just a reflexive one-word acknowledgment. → LIKE_ONLY (a like is the only appropriate response — never reply back to these, they're conversation terminators)
 JOKE: makes a joke → REPLY if you have something funny, else LIKE_ONLY
 SHARING_EXPERIENCE: shares a related experience → REPLY
 FOLLOW_UP: expands the discussion ("what if...", "interesting...") → REPLY
@@ -81,7 +83,8 @@ async function classifyWithOllama(
 
     // Validate the parsed result
     const validClasses = [
-      "QUESTION", "GREETINGS", "WELL_WISH", "DISAGREEMENT", "AGREEMENT", "JOKE",
+      "QUESTION", "GREETINGS", "WELL_WISH", "DISAGREEMENT", "AGREEMENT",
+      "CONVERSATION_CLOSER", "JOKE",
       "SHARING_EXPERIENCE", "FOLLOW_UP", "PRAISE", "CRITICISM",
       "THANK_YOU", "SPAM", "BOT", "EMOJI_ONLY", "TAGGING_FRIEND",
       "MISUNDERSTANDING",
@@ -169,12 +172,21 @@ function classifyWithKeywords(replyText: string, originalTweetText?: string): Re
     return { replyClass: "QUESTION", engagementDecision: "REPLY", reason: "asked a question" };
   }
 
+  // Conversation closer — a short reflexive acknowledgment ("fr", "exactly",
+  // "yes", "ok", "facts", "this", "same", "lmao"). Closes the conversation
+  // with nothing new. Like and move on, never reply back.
+  if (isConversationCloser(t)) {
+    return { replyClass: "CONVERSATION_CLOSER", engagementDecision: "LIKE_ONLY", reason: "conversation closer — like and move on" };
+  }
+
   // Thank you
   if (/\b(thanks|thank you|appreciate|ty)\b/i.test(t)) {
     return { replyClass: "THANK_YOU", engagementDecision: "LIKE_ONLY", reason: "thank you reply" };
   }
 
-  // Simple agreement
+  // Simple agreement (non-closer — longer restatement/co-sign without adding
+  // a new angle; the SHORT reflexive ack case is already handled above by
+  // isConversationCloser)
   if (
     /^(facts|this|exactly|true|real|100%|agreed|co-sign|co sign)\b/i.test(t) ||
     /^this\s*$/.test(t)
@@ -242,6 +254,8 @@ function classifyWithKeywords(replyText: string, originalTweetText?: string): Re
 // good-faith ones. Only applies to classes that would otherwise ALWAYS
 // trigger a visible action (REPLY/REPLY_AND_LIKE/END_CONVERSATION) —
 // classes that already resolve to LIKE_ONLY or IGNORE are untouched.
+// CONVERSATION_CLOSER always resolves to LIKE_ONLY (a like is the only
+// appropriate response, never a reply), so it has no entry here.
 const ENGAGEMENT_PROBABILITY: Partial<Record<ReplyClass, number>> = {
   QUESTION: 0.95,
   GREETINGS: 0.7,
@@ -254,14 +268,10 @@ const ENGAGEMENT_PROBABILITY: Partial<Record<ReplyClass, number>> = {
   MISUNDERSTANDING: 0.85,
 };
 
-// When the roll fails, REPLY/REPLY_AND_LIKE downgrade to LIKE_ONLY. Despite
-// the name, LIKE_ONLY doesn't mean silent-except-for-a-like here — see
-// notifications.ts/engage.ts, it posts a short canned closing reaction
-// (postClosingReaction). There's no actual like-button click implemented
-// anywhere in this codebase yet (every `[data-testid="like"]` reference is
-// read-only, for scoring), so genuine "liked but said nothing" isn't
-// available as an action to fall back to — this trades a full generated
-// reply for a short reaction instead of true silence.
+// When the roll fails, REPLY/REPLY_AND_LIKE downgrade to LIKE_ONLY — which
+// now means a genuine like with NO text response back (see
+// likeAndMoveOn in processReply.ts). Conversation closers, praise, thanks,
+// and well-wishes all route here: like the reply and move on.
 //
 // END_CONVERSATION downgrades to IGNORE instead — a real, total skip, not
 // LIKE_ONLY. notifications.ts/engage.ts route END_CONVERSATION and

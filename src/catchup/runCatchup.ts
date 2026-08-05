@@ -185,7 +185,7 @@ export async function runCatchup(
       const handlePost = async (post: ProfileOriginalTweet): Promise<void | true> => {
         // Global hourly reply budget (storage/hourlyReplyQuota.ts) —
         // pauses this whole run until the next hour once this hour's
-        // shared 6-12 target is reached (by this script or any other),
+        // shared 1-3 target is reached (by this script or any other),
         // and paces between individual replies otherwise so the budget
         // spreads across the hour instead of firing back-to-back —
         // before spending any resources on this post. catchup_forex_crypto
@@ -369,6 +369,22 @@ export async function runCatchup(
         }
 
         const tweetText = details.fullText || details.text;
+
+        // Story-teller handles specifically (catchup:stories and
+        // catchup:priority-stories both pass source: "catchup_stories") —
+        // a short post from one of these accounts isn't the actual
+        // narrative content this list exists for, it's a stray one-liner
+        // that doesn't carry enough to reflect on. Checked against the
+        // full extracted text, same as every other content gate here, not
+        // the timeline-preview text start:search's 120-char filter uses.
+        if (source === "catchup_stories" && tweetText.length < 200) {
+          const reason = `too short for a story reply (${tweetText.length} chars, need 200+)`;
+          log(`${label} ${post.url} ${reason} — skipping.`);
+          await recordHandled(source, post.id, reason);
+          skipped.push({ url: post.url, reason });
+          totalSkippedOther++;
+          return;
+        }
 
         // Media posts (image, video, or GIF) carry context an LLM can
         // miss, so they're a manual-review-only gate — skipped outright

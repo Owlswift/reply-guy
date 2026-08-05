@@ -7,6 +7,7 @@ export type ReplyClass =
   | "WELL_WISH"
   | "DISAGREEMENT"
   | "AGREEMENT"
+  | "CONVERSATION_CLOSER"
   | "JOKE"
   | "SHARING_EXPERIENCE"
   | "FOLLOW_UP"

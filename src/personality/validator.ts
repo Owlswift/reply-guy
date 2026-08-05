@@ -74,5 +74,42 @@ export function validateReply(reply: string): boolean {
     return false;
   }
 
+  // Disclaiming personal experience before actually reacting — the exact
+  // hedge personality/prompt.ts already bans in prose (philosophy block +
+  // final guardrail: "I can't say I've experienced this", "I haven't been
+  // through this myself", etc.), but that's a soft instruction the model
+  // doesn't always follow — and personal_perspective mode (which
+  // explicitly asks for a relevant personal experience) is now weighted
+  // much higher for stories, the case most likely to trigger this hedge
+  // when the model doesn't actually have a matching experience to offer.
+  // Same reasoning as the em-dash check above: mechanically catch it and
+  // force a regeneration instead of trusting the prompt alone.
+  const experienceDisclaimers = [
+    "haven't experienced",
+    "havent experienced",
+    "never experienced",
+    "haven't been through",
+    "havent been through",
+    "never been through",
+    "can't say i've experienced",
+    "cant say ive experienced",
+    "can't say this happened to me",
+    "cant say this happened to me",
+    "can't honestly say this happened",
+    "cant honestly say this happened",
+    "can't speak from experience",
+    "cant speak from experience",
+    "can't relate personally",
+    "cant relate personally",
+    "can't pretend i've had",
+    "cant pretend ive had",
+    "not something i've experienced",
+    "not something ive experienced",
+  ];
+  const lowerReplyFirst150 = trimmed.toLowerCase().substring(0, 150);
+  if (experienceDisclaimers.some(phrase => lowerReplyFirst150.includes(phrase))) {
+    return false;
+  }
+
   return true;
 }

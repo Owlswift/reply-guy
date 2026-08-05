@@ -501,7 +501,7 @@ async function main() {
     // Global hourly reply budget (storage/hourlyReplyQuota.ts) — shared
     // across every script, not just this one. Pauses the whole cycle (no
     // watching, no scrolling) until the next hour once this hour's random
-    // 6-12 target is reached, AND paces between individual replies the
+    // 1-3 target is reached, AND paces between individual replies the
     // rest of the time so the budget actually spreads across the hour
     // instead of firing back-to-back — deliberate shift from maximizing
     // reply volume to maximizing reply quality.

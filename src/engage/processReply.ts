@@ -15,6 +15,7 @@ import {
 } from "./extractThreadReplies";
 import { addReplyNode, buildConversationContext } from "./threadConversationTracker";
 import { ReplyClassification, ReplyClass } from "./types";
+import { likeReplyOnPage } from "./likeReply";
 // Dispatcher wiring — disconnected for now so scripts post directly/independently again.
 // See src/dispatcher.ts and src/storage/replyQueue.ts to re-enable.
 // import { enqueueReplyJob } from "../storage/replyQueue";
@@ -35,17 +36,67 @@ export function shouldSkipReply(classification: ReplyClassification): boolean {
   return false;
 }
 
+/**
+ * Should this reply get ONLY a like and no response at all?
+ *
+ * Conversation closers ("fr", "exactly", "yes", "facts", "same", "ok") are
+ * conversation terminators — the person has nothing left to say and isn't
+ * inviting a reply. Posting anything back (even a short "facts 😭") reads
+ * as a bot reflex. Like it and move on is the only natural response.
+ */
+export function shouldLikeOnly(classification: ReplyClassification): boolean {
+  // Explicit LIKE_ONLY decision from the classifier (conversation closers
+  // classify to LIKE_ONLY) — a like is the action, no reply.
+  return classification.engagementDecision === "LIKE_ONLY";
+}
+
+/**
+ * Like the reply on its permalink page and nothing else. Used for
+ * conversation closers where a response would be a bot-tell.
+ */
+export async function likeAndMoveOn(params: {
+  browserContext: BrowserContext;
+  reply: ExtractedReply;
+  page?: Page;
+}): Promise<boolean> {
+  const { browserContext, reply } = params;
+  const replyPermalink = `https://x.com/${reply.authorHandle.replace(/^@/, "")}/status/${reply.id}`;
+  const replyPage = params.page ?? await browserContext.newPage();
+
+  try {
+    if (!params.page) {
+      await replyPage.goto(replyPermalink, { waitUntil: "domcontentloaded", timeout: 15000 });
+      await replyPage.waitForSelector("article", { timeout: 10000 });
+      await new Promise(r => setTimeout(r, 1800));
+    }
+
+    return await likeReplyOnPage(replyPage, reply.id);
+  } catch (err) {
+    log(`[Engage] Error liking reply from ${reply.authorHandle}: ${err}`);
+    return false;
+  } finally {
+    if (!params.page) {
+      await replyPage.close().catch(() => {});
+    }
+  }
+}
+
 export function shouldEndConversation(classification: ReplyClassification): boolean {
   return classification.engagementDecision === "END_CONVERSATION";
 }
 
 // Short closing acknowledgments — for replies that don't need or invite a
 // real back-and-forth. Which pool fits depends on WHAT the reply actually
-// was, not just that it landed on LIKE_ONLY/END_CONVERSATION: "yeah
-// exactly" reads fine as agreement ("facts", "this") but makes no sense as
-// a response to praise or a well-wish — those need an actual thanks or a
-// reciprocal reply, not an agreement filler. Three pools instead of one
-// shared list so the reaction actually matches the reply it's closing out.
+// was, not just that it landed on END_CONVERSATION: "yeah exactly" reads
+// fine as agreement ("facts", "this") but makes no sense as a response to
+// praise or a well-wish — those need an actual thanks or a reciprocal
+// reply, not an agreement filler. Three pools instead of one shared list
+// so the reaction actually matches the reply it's closing out.
+//
+// NOTE: CONVERSATION_CLOSER and LIKE_ONLY no longer go through
+// postClosingReaction — they get a like and move on via likeAndMoveOn.
+// These pools are now only for END_CONVERSATION (a simple agreement that
+// still deserves a one-word acknowledgment back).
 
 // AGREEMENT (END_CONVERSATION) — someone just co-signing/restating the
 // original post. Also the fallback for classes with no dedicated pool
@@ -200,9 +251,10 @@ async function generateClosingReaction(
 
 /**
  * Post a short closing acknowledgment for a reply that doesn't need a real
- * generated response — either because it's simple agreement
- * (END_CONVERSATION) or because it's praise/well-wish/thanks/etc.
- * (LIKE_ONLY, which otherwise triggers no visible action at all).
+ * generated response — END_CONVERSATION only now. LIKE_ONLY (praise,
+ * well-wishes, thanks, conversation closers) goes through likeAndMoveOn
+ * instead — a like with no reply is the right call for those; posting any
+ * text back to a "thanks" or "fr" reads as a bot.
  *
  * Dispatcher wiring disconnected for now (see commented-out block below) —
  * this posts directly again, independently, like every other script.

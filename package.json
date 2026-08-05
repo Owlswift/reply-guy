@@ -13,6 +13,7 @@
     "dispatcher:watch": "bash scripts/watch-and-restart-dispatcher.sh",
     "catchup:priority": "tsx src/catchupPriorityHandles.ts",
     "catchup:stories": "tsx src/catchupStoryTellers.ts",
+    "catchup:priority-stories": "tsx src/catchupPriorityStoryTellers.ts",
     "catchup:forex-crypto": "tsx src/catchupForexCrypto.ts",
     "start:search": "tsx src/startSearch.ts",
     "ensure-running": "bash scripts/ensure-running.sh",

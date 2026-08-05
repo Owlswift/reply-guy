@@ -14,6 +14,8 @@ import { hasReachedMaxReplies } from "../engage/rateLimiter";
 import {
   shouldSkipReply,
   shouldEndConversation,
+  shouldLikeOnly,
+  likeAndMoveOn,
   postClosingReaction,
   handleReply,
   pace,
@@ -130,18 +132,26 @@ async function main() {
       isByMe: reply.isByMe,
     });
 
-    // Both END_CONVERSATION (simple agreement — "facts", "this") and
-    // LIKE_ONLY (praise, well-wishes, thanks, etc.) get the same short
-    // closing reaction rather than a full generated reply — LIKE_ONLY used
-    // to trigger no actual action at all beyond a log line, which reads as
-    // ignoring the person no matter what kind of positive comment it was.
-    if (shouldEndConversation(classification) || classification.engagementDecision === "LIKE_ONLY") {
-      const isLikeOnly = classification.engagementDecision === "LIKE_ONLY";
-      console.log(
-        isLikeOnly
-          ? `  ❤️ Reacting to ${reply.authorHandle}'s reply (LIKE_ONLY)`
-          : `  🏁 Ending conversation with ${reply.authorHandle}`
-      );
+    // LIKE_ONLY (conversation closers like "fr"/"exactly"/"yes", praise,
+    // thanks, well-wishes) → like the reply and move on. No response back —
+    // these are conversation terminators; posting anything reads as a bot.
+    // END_CONVERSATION (simple agreement — "facts", "this") still gets a
+    // short closing reaction.
+    if (shouldLikeOnly(classification)) {
+      console.log(`  ❤️ Liking ${reply.authorHandle}'s reply (${classification.replyClass}) — no response needed`);
+      const liked = await likeAndMoveOn({
+        browserContext: context,
+        reply,
+      });
+      if (liked) {
+        likesGiven++;
+      }
+      await pace();
+      continue;
+    }
+
+    if (shouldEndConversation(classification)) {
+      console.log(`  🏁 Ending conversation with ${reply.authorHandle}`);
       const posted = await postClosingReaction({
         browserContext: context,
         threadData,
@@ -149,14 +159,10 @@ async function main() {
         echoHandle,
         replyClass: classification.replyClass,
       });
-      if (isLikeOnly) {
-        likesGiven++;
-      } else {
-        conversationsEnded++;
-      }
       if (posted) {
         repliesPosted++;
       }
+      conversationsEnded++;
       await pace();
       continue;
     }

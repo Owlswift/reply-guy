@@ -17,6 +17,8 @@ import { classifyReply } from "../engage/classifyReply";
 import {
   shouldSkipReply,
   shouldEndConversation,
+  shouldLikeOnly,
+  likeAndMoveOn,
   postClosingReaction,
   handleReply,
   pace,
@@ -197,17 +199,26 @@ async function main() {
         isByMe: reply.isByMe,
       });
 
-      // Both END_CONVERSATION (simple agreement) and LIKE_ONLY (praise,
-      // well-wishes, thanks, etc.) get the same short closing reaction rather
-      // than a full generated reply — LIKE_ONLY used to trigger no actual
-      // action at all, which reads as ignoring the person.
-      if (shouldEndConversation(classification) || classification.engagementDecision === "LIKE_ONLY") {
-        const isLikeOnly = classification.engagementDecision === "LIKE_ONLY";
-        console.log(
-          isLikeOnly
-            ? `  ❤️ Reacting to ${reply.authorHandle}'s reply (LIKE_ONLY)`
-            : `  🏁 Ending conversation with ${reply.authorHandle}`
-        );
+      // LIKE_ONLY (conversation closers like "fr"/"exactly"/"yes", praise,
+      // thanks, well-wishes) → like the reply and move on. No response back —
+      // these are conversation terminators; posting anything reads as a bot.
+      // END_CONVERSATION (simple agreement) still gets a short closing
+      // reaction.
+      if (shouldLikeOnly(classification)) {
+        console.log(`  ❤️ Liking ${reply.authorHandle}'s reply (${classification.replyClass}) — no response needed`);
+        const liked = await likeAndMoveOn({
+          browserContext: context,
+          reply,
+          page: notifPage,
+        });
+        if (liked) likesGiven++;
+        await notifPage.close().catch(() => {});
+        await pace();
+        continue;
+      }
+
+      if (shouldEndConversation(classification)) {
+        console.log(`  🏁 Ending conversation with ${reply.authorHandle}`);
         const posted = await postClosingReaction({
           browserContext: context,
           threadData,
@@ -216,12 +227,8 @@ async function main() {
           replyClass: classification.replyClass,
           page: notifPage,
         });
-        if (isLikeOnly) {
-          likesGiven++;
-        } else {
-          conversationsEnded++;
-        }
         if (posted) repliesPosted++;
+        conversationsEnded++;
         await pace();
         continue;
       }

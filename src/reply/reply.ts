@@ -4,6 +4,8 @@ import { typeReply } from "./typeReply";
 import { submitReply } from "./submitReply";
 import { logReply } from "../core/logger";
 import { recordReplyForHour } from "../storage/hourlyReplyStats";
+import { recordStoryTellerReplyForDay } from "../storage/dailyStoryTellerReplyStats";
+import { isStoryTeller } from "../storage/storyTellerHandles";
 import { acquirePostLock, releasePostLock } from "../storage/postLock";
 
 // Fill the reply textbox (without submitting)
@@ -73,6 +75,20 @@ export async function clickReply(
   // quota budget despite never waiting for it.
   if (success) {
     await recordReplyForHour().catch(() => {});
+
+    // If the author is a known story teller (storage/storyTellerHandles.ts),
+    // also bump today's per-handle reply count
+    // (storage/dailyStoryTellerReplyStats.ts) so we can answer "how many
+    // of each story teller's posts did we reply to today?" — same
+    // universal-funnel reasoning as recordReplyForHour() above: every
+    // posting path funnels through clickReply(), so recording here (rather
+    // than at each caller) keeps the daily log accurate across all of them.
+    if (author) {
+      const storyTeller = await isStoryTeller(author).catch(() => false);
+      if (storyTeller) {
+        await recordStoryTellerReplyForDay(author).catch(() => {});
+      }
+    }
   }
 
   return success;
